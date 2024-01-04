@@ -5,7 +5,7 @@
 ///
 /// "02 01 19" encodes
 /// INTEGER, length 1, 25.
-fn decode_human(s: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
+fn _decode_human(s: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
     let clean: String = s.chars().filter(|x| !x.is_whitespace()).collect();
 
     let n = 2;
@@ -15,7 +15,7 @@ fn decode_human(s: &str) -> Result<Vec<u8>, std::num::ParseIntError> {
         .collect()
 }
 
-fn parse(tlv: &[u8]) -> Option<i64> {
+fn _parse(tlv: &[u8]) -> Option<i64> {
     let l = tlv.get(1).expect("wrong input length");
     println!("expect get len ok: {:?}", l);
     // ?? expect int or string tag, valuate return generic
@@ -24,18 +24,19 @@ fn parse(tlv: &[u8]) -> Option<i64> {
     //     b"02" => Some()
     //     _ => 
     // }
-    match l {
-        _ => Some(0)
-    }
+    // match l {
+    //     _ => Some(0)
+    // }
+    Some(0)
 }
 
 /// 255 -> '01 FF'
-fn as_tlv_bytes(num: u8) -> Vec<u8> {
+fn _as_tlv_bytes(_num: u8) -> Vec<u8> {
     vec![]
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let _cli = Cli::parse();
     println!("yyy");
 }
 
@@ -44,7 +45,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_1() {
-        match parse(&decode_human("0C 04 4A6F686E").unwrap()) {
+        match _parse(&_decode_human("0C 04 4A6F686E").unwrap()) {
             None => assert!(false),
             _ => {}
         }
