@@ -31,3 +31,9 @@ target/
         euicc/
             euicc.asn1
             euicc.jer
+
+# references
+Specifications for the ASN.1 notation and how they are encoded can be found in the 'references/ITU T-REC' folder.
+Notable specifications are:
+- X6801.doc - Abstract Syntax Notation One (ASN.1):Specification of basic notation
+- X6901.doc - ASN.1 encoding rules: Specification of Basic Encoding Rules (BER), Canonical Encoding Rules (CER) and Distinguished Encoding Rules (DER)
