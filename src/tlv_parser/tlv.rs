@@ -6,10 +6,12 @@ pub struct EncodingData{
     pub content: Option<Content>,
 }
 impl EncodingData{
+    pub fn new(identifier: Identifier) -> EncodingData{
+        EncodingData { identifier, length: None, content: None}
+    }
     pub fn is_length_limit_reached(&self) -> bool{
         false
     }
-
 }
 
 #[derive(Debug, Clone)]
