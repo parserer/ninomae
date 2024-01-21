@@ -1,4 +1,4 @@
-use num::BigUint;
+use num::{BigUint, Zero};
 
 
 #[derive(Debug, Clone)]
@@ -12,7 +12,10 @@ impl EncodingData{
         EncodingData { identifier, length: None, content: None}
     }
     pub fn is_length_limit_reached(&self) -> bool{
-        false
+        todo!()
+    }
+    pub fn bits(&self) -> u64{
+        todo!()
     }
 }
 
@@ -20,12 +23,9 @@ impl EncodingData{
 pub struct Identifier{
     pub class: IdentifierClass,
     pub data_type: DataType,
-    pub tag_number: BigUint
+    pub tag_number: u32
 }
 impl Identifier  {
-    pub fn get_tag_number_as_usize(&self) -> Option<usize>{
-        todo!()
-    }
 }
 
 #[derive(Debug,Clone,PartialEq)]
@@ -44,12 +44,9 @@ pub enum DataType{
 
 #[derive(Debug, Clone)]
 pub struct Length{
-    pub length: BigUint
+    pub length: u32
 }
 impl Length{
-    pub fn get_length_as_usize(&self) -> Option<usize>{
-        todo!()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -59,12 +56,16 @@ pub enum Content{
     // for data types not yet implemented
     Raw(Vec<u8>)
 }
+impl Content {
+}
 
 
 #[derive(Debug, Clone)]
 pub enum PrimitiveContent{
     Boolean(bool),
-    Integer(Vec<u8>),
+    Integer(BigUint),
     OctetString(Vec<u8>),
     UTF8String(String)
+}
+impl PrimitiveContent{
 }

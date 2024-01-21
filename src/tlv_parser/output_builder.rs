@@ -131,12 +131,12 @@ mod test {
         Identifier{
             class: IdentifierClass::Universal,
             data_type: DataType::Primitive,
-            tag_number: BigUint::from_usize(1).unwrap()
+            tag_number: 1
         }
     }
 
     fn create_test_length() -> Length{
-        Length { length : BigUint::zero()}
+        Length { length : 0}
     }
 
     fn create_test_content() -> Content{
