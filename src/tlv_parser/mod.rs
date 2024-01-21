@@ -175,7 +175,7 @@ impl IState for ParseLength{
             let num_bytes_to_take = next & 0b0111_1111;
             let mut length = Vec::new();
             // take num of bytes
-            for _ in 1..num_bytes_to_take {
+            for _ in 0..num_bytes_to_take {
                 let (_pos, next) = input.next().ok_or(TLVParseError::new("Error parsing Identifier. Unexpected EOF"))?;
                 length.push(next);
             }
@@ -217,10 +217,10 @@ mod test{
 
 
     fn create_input(input: Vec<u8>) -> StateInput{
-        input.iter().for_each(|b|{
-            println!("{:b}",b)
-        });
-        println!("--");
+        // input.iter().for_each(|b|{
+        //     println!("{:b}",b)
+        // });
+        // println!("--");
         let iter : Box<dyn Iterator<Item = u8>>= Box::new(input.into_iter());
         iter.enumerate().peekable()
     }
@@ -295,5 +295,16 @@ mod test{
 
         let data = output_builder.take_result().pop().unwrap();
         assert_eq!(data.length.as_ref().unwrap().length.to_usize().unwrap(), 42);
+    }
+
+    #[test]
+    fn test_parse_length_3bytes(){
+        let mut input = create_input(vec![0x83, 0x11, 0x11, 0x11]);
+        let state = ParseLength;
+        let mut output_builder = create_test_output_builder_w_id();
+        let _next_state = state.transition(&mut input, &mut output_builder).unwrap();
+
+        let data = output_builder.take_result().pop().unwrap();
+        assert_eq!(data.length.as_ref().unwrap().length.to_bytes_be().iter().filter(|v| **v == 0x11).count(), 3);
     }
 }
