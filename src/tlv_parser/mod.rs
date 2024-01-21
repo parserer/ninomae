@@ -69,6 +69,8 @@ impl IState for FinishedState{
     }
 }
 
+/// This state does not consume input, will just peek and determine whether
+///  to continue parsing or not
 struct InitialState;
 impl IState for InitialState{
     fn transition(&self, input: &mut StateInput,output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult{
@@ -207,9 +209,11 @@ mod test{
 
     use std::{any::{Any, TypeId}, ops::Deref};
 
+    use num::ToPrimitive;
+
     use crate::tlv_parser::{ParseLength, tlv::{IdentifierClass, DataType}};
 
-    use super::{ParseIdentifier, IState, output_builder::EncodingDataOutputBuilder, StateInput};
+    use super::{ParseIdentifier, IState, output_builder::EncodingDataOutputBuilder, StateInput, tlv::Identifier};
 
 
     fn create_input(input: Vec<u8>) -> StateInput{
@@ -219,6 +223,16 @@ mod test{
         println!("--");
         let iter : Box<dyn Iterator<Item = u8>>= Box::new(input.into_iter());
         iter.enumerate().peekable()
+    }
+
+    fn create_test_output_builder_w_id() -> EncodingDataOutputBuilder{
+        let mut builder = EncodingDataOutputBuilder::new();
+        builder.add_identifier(Identifier{
+            class: IdentifierClass::Universal,
+            data_type: DataType::Primitive,
+            tag_number: vec![0]
+        });
+        builder
     }
 
     #[test]
@@ -270,5 +284,16 @@ mod test{
         data.identifier.tag_number.iter().for_each(|b|{
             println!("{:b}",b)
         });
+    }
+
+    #[test]
+    fn test_parse_length_1byte(){
+        let mut input = create_input(vec![42]);
+        let state = ParseLength;
+        let mut output_builder = create_test_output_builder_w_id();
+        let _next_state = state.transition(&mut input, &mut output_builder).unwrap();
+
+        let data = output_builder.take_result().pop().unwrap();
+        assert_eq!(data.length.as_ref().unwrap().length.to_usize().unwrap(), 42);
     }
 }
