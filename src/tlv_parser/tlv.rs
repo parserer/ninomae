@@ -1,3 +1,5 @@
+use num::BigUint;
+
 
 #[derive(Debug, Clone)]
 pub struct EncodingData{
@@ -42,7 +44,7 @@ pub enum DataType{
 
 #[derive(Debug, Clone)]
 pub struct Length{
-    pub raw: Vec<u8>
+    pub length: BigUint
 }
 impl Length{
     pub fn get_length_as_usize(&self) -> Option<usize>{

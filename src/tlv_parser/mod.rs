@@ -1,5 +1,7 @@
 use std::{io::Error, iter::{Peekable, Enumerate}, rc::Rc, cell::RefCell};
 
+use num::{BigUint, Zero};
+
 use self::tlv::{EncodingData, Identifier, Length, Content, DataType, IdentifierClass};
 use self::output_builder::EncodingDataOutputBuilder;
 
@@ -164,12 +166,42 @@ impl IState for ParseIdentifier{
 struct ParseLength;
 impl IState for ParseLength{
     fn transition(&self, input: &mut StateInput,output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult{
-        let next = input.next().ok_or(TLVParseError::new("Error parsing Identifier. Unexpected EOF"))?;
-
-        todo!()
+        let (_pos, next) = input.next().ok_or(TLVParseError::new("Error parsing Length. Unexpected EOF"))?;
+        let mut is_length_zero = false;
+        if (next & 0b1000_0000) != 0 {
+            // length on multiple lengths
+            let num_bytes_to_take = next & 0b0111_1111;
+            let mut length = Vec::new();
+            // take num of bytes
+            for _ in 1..num_bytes_to_take {
+                let (_pos, next) = input.next().ok_or(TLVParseError::new("Error parsing Identifier. Unexpected EOF"))?;
+                length.push(next);
+            }
+            let length = Length{length:BigUint::from_bytes_be(length.as_slice())};
+            is_length_zero = length.length.is_zero();
+            output_builder.add_length(length);
+        } else {
+            // length on one byte
+            let length = Length{length: BigUint::from(next & 0b0111_1111)};
+            is_length_zero = length.length.is_zero();
+            output_builder.add_length(length);
+            
+        }
+        if is_length_zero{
+            return Ok(Box::new(InitialState))
+        } else {
+            return Ok(Box::new(ParseContent))
+        }
     }
 }
 
+
+struct ParseContent;
+impl IState for ParseContent{
+    fn transition(&self, input: &mut StateInput, output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult {
+        todo!()
+    }
+}
 #[cfg(test)]
 mod test{
 

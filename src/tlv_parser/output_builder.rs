@@ -123,6 +123,8 @@ impl EncodingDataOutputBuilder {
 
 #[cfg(test)]
 mod test {
+    use num::{BigUint, Zero};
+
     use crate::tlv_parser::{tlv::{Identifier, IdentifierClass, DataType, Length, Content, PrimitiveContent}, output_builder::{EncodingDataOutputBuilder, EncodingDataOutputBuilder2}};
 
     fn create_test_identifier() -> Identifier{
@@ -134,7 +136,7 @@ mod test {
     }
 
     fn create_test_length() -> Length{
-        Length { raw: vec![0] }
+        Length { length : BigUint::zero()}
     }
 
     fn create_test_content() -> Content{
