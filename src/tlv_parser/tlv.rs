@@ -20,7 +20,7 @@ impl EncodingData{
 pub struct Identifier{
     pub class: IdentifierClass,
     pub data_type: DataType,
-    pub tag_number: Vec<u8>
+    pub tag_number: BigUint
 }
 impl Identifier  {
     pub fn get_tag_number_as_usize(&self) -> Option<usize>{

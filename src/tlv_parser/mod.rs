@@ -1,3 +1,4 @@
+
 use std::{io::Error, iter::{Peekable, Enumerate}, rc::Rc, cell::RefCell};
 
 use num::{BigUint, Zero};
@@ -113,7 +114,7 @@ impl IState for ParseIdentifier{
         };
         //
         // tag_number type on bit 5-1 & subsequent bytes (if applicable)
-        let tag_number : Vec<u8> = match next & 0b0001_1111{
+        let tag_number : BigUint = match next & 0b0001_1111{
             0b0001_1111 => {
                 // IS THIS CORRECT IMPLEM? THERE IS NO CLEAR EXAMPLE IN SPEC
                 // tag number on multiple bytes
@@ -151,9 +152,9 @@ impl IState for ParseIdentifier{
                     }
                     (_pos ,next) = input.next().ok_or(TLVParseError::new("Error parsing Identifier. Unexpected EOF"))?;
                 }
-                tag_number
+                BigUint::from_bytes_be(tag_number.as_slice())
             },
-            _ => vec![next as u8 & 0b0001_1111],  
+            _ => BigUint::from_bytes_be(vec![next & 0b0001_1111].as_slice()),  
         };
         // output identifier
         output_builder.add_identifier(Identifier{
@@ -207,9 +208,9 @@ impl IState for ParseContent{
 #[cfg(test)]
 mod test{
 
-    use std::{any::{Any, TypeId}, ops::Deref};
+    use std::{any::{Any, TypeId}, ops::Deref, vec};
 
-    use num::ToPrimitive;
+    use num::{ToPrimitive, BigUint, Zero, traits::ToBytes};
 
     use crate::tlv_parser::{ParseLength, tlv::{IdentifierClass, DataType}};
 
@@ -230,7 +231,7 @@ mod test{
         builder.add_identifier(Identifier{
             class: IdentifierClass::Universal,
             data_type: DataType::Primitive,
-            tag_number: vec![0]
+            tag_number: BigUint::zero()
         });
         builder
     }
@@ -245,7 +246,7 @@ mod test{
         let data = output_builder.take_result().pop().unwrap();
         assert_eq!(data.identifier.class, IdentifierClass::Universal);
         assert_eq!(data.identifier.data_type, DataType::Primitive);
-        assert_eq!(*data.identifier.tag_number.first().unwrap(), 0);
+        assert!(data.identifier.tag_number.is_zero());
     }
 
     #[test]
@@ -258,7 +259,7 @@ mod test{
         let data = output_builder.take_result().pop().unwrap();
         assert_eq!(data.identifier.class, IdentifierClass::Application);
         assert_eq!(data.identifier.data_type, DataType::Constructed);
-        assert_eq!(*data.identifier.tag_number.first().unwrap(), 1);
+        assert_eq!(data.identifier.tag_number.to_usize().unwrap(), 1);
     }
 
     #[test]
@@ -270,7 +271,7 @@ mod test{
 
         let data = output_builder.take_result().pop().unwrap();
         assert_eq!(data.identifier.class, IdentifierClass::ContextSpecific);
-        assert_eq!(*data.identifier.tag_number.first().unwrap(), 30);
+        assert_eq!(data.identifier.tag_number.to_usize().unwrap(), 30);
     }
 
     #[test]
@@ -281,9 +282,7 @@ mod test{
         let _next_state = state.transition(&mut input, &mut output_builder).unwrap();
 
         let data = output_builder.take_result().pop().unwrap();
-        data.identifier.tag_number.iter().for_each(|b|{
-            println!("{:b}",b)
-        });
+        assert_eq!(data.identifier.tag_number.to_be_bytes(), vec![0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0]);
     }
 
     #[test]
