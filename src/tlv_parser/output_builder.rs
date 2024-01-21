@@ -4,6 +4,8 @@ use super::tlv::{Identifier, EncodingData, DataType, Content, Length};
 
 ///  This doesn't work! HOW TO DROP BORROW OF A STRUCT FIELD???
 /// 
+/// 
+#[deprecated]
 pub(super) struct EncodingDataOutputBuilder2<'a>{
     _list_of_data: Option<Vec<EncodingData>>,
     _current_data: Option<&'a mut EncodingData>
@@ -58,6 +60,7 @@ impl<'a> EncodingDataOutputBuilder2<'a> {
     }
 }
 
+
 pub(super) struct EncodingDataOutputBuilder{
     _list_of_data: Option<Vec<Rc<RefCell<EncodingData>>>>,
     _current_data: Option<Rc<RefCell<EncodingData>>>
@@ -79,7 +82,7 @@ impl EncodingDataOutputBuilder {
         self._list_of_data.as_mut().unwrap().push(self._current_data.as_ref().unwrap().clone());
     }
 
-    pub fn set_identifier(&mut self, identifier: Identifier){
+    pub fn add_identifier(&mut self, identifier: Identifier){
         // check if current data length limit is reached or it is primitive
         //  if it is create new data
         //  otherwise, append to content of current data
@@ -94,6 +97,8 @@ impl EncodingDataOutputBuilder {
                             length: None,
                             content: None
                         })
+                    } else {
+                        panic!("Something went wrong, data type is constructed, but content type is not of Constructed type")
                     }
                 }
             }
@@ -101,12 +106,14 @@ impl EncodingDataOutputBuilder {
             self._create_new_data(identifier);
         }
     }
-    pub fn set_length(&mut self, length: Length){
-
+    pub fn add_length(&mut self, length: Length){
+        let cur_data = self._current_data.as_ref().expect("Something went wrong, trying to add length when current data is none");
+        cur_data.borrow_mut().length = Some(length);
     }
-    pub fn set_content(&mut self, content: Content){
-
-    }
+    pub fn add_content(&mut self, content: Content){
+        let cur_data = self._current_data.as_ref().expect("Something went wrong, trying to add content when current data is none");
+        cur_data.borrow_mut().content = Some(content);
+    }   
 
     pub fn take_result(&mut self)->Vec<EncodingData>{
         self._current_data=None;
@@ -116,9 +123,7 @@ impl EncodingDataOutputBuilder {
 
 #[cfg(test)]
 mod test {
-    use std::result;
-
-    use crate::tlv_parser::{tlv::{Identifier, IdentifierClass, DataType}, output_builder::{EncodingDataOutputBuilder, EncodingDataOutputBuilder2}};
+    use crate::tlv_parser::{tlv::{Identifier, IdentifierClass, DataType, Length, Content, PrimitiveContent}, output_builder::{EncodingDataOutputBuilder, EncodingDataOutputBuilder2}};
 
     fn create_test_identifier() -> Identifier{
         Identifier{
@@ -128,23 +133,68 @@ mod test {
         }
     }
 
+    fn create_test_length() -> Length{
+        Length { raw: vec![0] }
+    }
+
+    fn create_test_content() -> Content{
+        Content::Primitive(PrimitiveContent::Boolean(false))
+    }
+
     #[test]
-    fn test_set_id(){
+    fn test_add_id(){
         let mut builder = EncodingDataOutputBuilder::new();
-        builder.set_identifier(create_test_identifier());
+        builder.add_identifier(create_test_identifier());
         let result = builder.take_result();
 
         assert_eq!(result.len(), 1);
     }
 
     #[test]
-    fn test_set_id_twice(){
+    fn test_add_id_twice(){
         let mut builder = EncodingDataOutputBuilder::new();
-        builder.set_identifier(create_test_identifier());
-        builder.set_identifier(create_test_identifier());
+        builder.add_identifier(create_test_identifier());
+        builder.add_identifier(create_test_identifier());
         let result = builder.take_result();
 
         assert_eq!(result.len(), 2);
+    }
+
+
+    #[test]
+    fn test_add_length(){
+        let mut builder = EncodingDataOutputBuilder::new();
+        builder.add_identifier(create_test_identifier());
+        builder.add_length(create_test_length());
+        let result = builder.take_result();
+
+        assert_eq!(result.len(), 1);
+        assert!(result.first().as_ref().unwrap().length.is_some());
+    }
+
+    #[test]
+    fn test_add_content(){
+        let mut builder = EncodingDataOutputBuilder::new();
+        builder.add_identifier(create_test_identifier());
+        builder.add_content(create_test_content());
+        let result = builder.take_result();
+
+        assert_eq!(result.len(), 1);
+        assert!(result.first().as_ref().unwrap().content.is_some());
+    }
+
+    #[test]
+    fn test_add_after_second_id(){
+        let mut builder = EncodingDataOutputBuilder::new();
+        builder.add_identifier(create_test_identifier());
+        builder.add_identifier(create_test_identifier());
+        builder.add_length(create_test_length());
+        builder.add_content(create_test_content());
+        let result = builder.take_result();
+
+        assert_eq!(result.len(), 2);
+        assert!(result.last().as_ref().unwrap().length.is_some());
+        assert!(result.last().as_ref().unwrap().content.is_some());
     }
 
     // #[test]

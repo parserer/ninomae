@@ -152,7 +152,7 @@ impl IState for ParseIdentifier{
             _ => vec![next as u8 & 0b0001_1111],  
         };
         // output identifier
-        output_builder.set_identifier(Identifier{
+        output_builder.add_identifier(Identifier{
             class:identifier_class,
             data_type,
             tag_number,
