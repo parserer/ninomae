@@ -61,9 +61,11 @@ impl<'a> EncodingDataOutputBuilder2<'a> {
 }
 
 
+pub type EncodingDataRcel = Rc<RefCell<EncodingData>>;
+
 pub(super) struct EncodingDataOutputBuilder{
-    _list_of_data: Option<Vec<Rc<RefCell<EncodingData>>>>,
-    _current_data: Option<Rc<RefCell<EncodingData>>>
+    _list_of_data: Option<Vec<EncodingDataRcel>>,
+    _current_data: Option<EncodingDataRcel>
 }
 impl EncodingDataOutputBuilder {
     pub fn new()-> EncodingDataOutputBuilder{
@@ -118,6 +120,10 @@ impl EncodingDataOutputBuilder {
     pub fn take_result(&mut self)->Vec<EncodingData>{
         self._current_data=None;
         self._list_of_data.take().unwrap().into_iter().map(|data| Rc::try_unwrap(data).unwrap().into_inner()).collect()
+    }
+
+    pub fn get_cur_data(&self) -> Option<Rc<RefCell<EncodingData>>>{
+        return self._current_data.clone()
     }
 }
 

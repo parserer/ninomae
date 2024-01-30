@@ -1,8 +1,8 @@
 use std::{io::Error, iter::{Peekable, Enumerate}, rc::Rc, cell::RefCell};
 
-use num::{BigUint, Zero};
+use num::{BigUint, One, Zero};
 
-use self::tlv::{EncodingData, Identifier, Length, Content, DataType, IdentifierClass};
+use self::{output_builder::EncodingDataRcel, tlv::{EncodingData, Identifier, Length, Content, DataType, IdentifierClass}};
 use self::output_builder::EncodingDataOutputBuilder;
 
 pub mod tlv;
@@ -199,9 +199,37 @@ impl IState for ParseLength{
 
 
 struct ParseContent;
+impl ParseContent {
+    fn parse_raw(&self, input: &mut StateInput, length: &Length, output_builder: &mut EncodingDataOutputBuilder)
+    -> Result<(), TLVParseError>{
+        if length.length.is_zero() {return Ok(());}
+
+        let mut content = Vec::new();
+        let mut count : BigUint = BigUint::zero();
+        while count < length.length {
+            let (_pos, next) = input.next().ok_or(TLVParseError::new("Error parsing Content. Unexpected EOF"))?;
+            content.push(next);
+            count += BigUint::one();
+        }
+        output_builder.add_content(Content::Raw(content));
+        return Ok(());
+    }
+}
 impl IState for ParseContent{
     fn transition(&self, input: &mut StateInput, output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult {
-        todo!()
+        // check prev tag, whether it is constructed or not
+        let cur_data = output_builder.get_cur_data().ok_or(TLVParseError::new("Parsing content without ownner"))?;
+
+        if cur_data.borrow().identifier.data_type == DataType::Primitive{
+            let length = cur_data.borrow().length.clone().ok_or(TLVParseError::new("Owner does not have length defined"))?;
+            // parse primitive value
+            match self.parse_raw(input, &length, output_builder){
+                Ok(())=>(),
+                Err(e) => return Err(e)
+            };
+        }
+
+        return  Ok(Box::new(ParseIdentifier));    
     }
 }
 #[cfg(test)]
@@ -209,18 +237,18 @@ mod test{
 
     use std::{any::{Any, TypeId}, ops::Deref};
 
-    use num::ToPrimitive;
+    use num::{BigInt, FromPrimitive, ToPrimitive};
 
-    use crate::tlv_parser::{ParseLength, tlv::{IdentifierClass, DataType}};
+    use crate::tlv_parser::{tlv::{DataType, IdentifierClass, Length}, ParseContent, ParseLength};
 
-    use super::{ParseIdentifier, IState, output_builder::EncodingDataOutputBuilder, StateInput, tlv::Identifier};
+    use super::{ParseIdentifier, IState, output_builder::EncodingDataOutputBuilder, StateInput, tlv::{Content, Identifier}};
 
 
     fn create_input(input: Vec<u8>) -> StateInput{
-        input.iter().for_each(|b|{
-            println!("{:b}",b)
-        });
-        println!("--");
+        // input.iter().for_each(|b|{
+        //     println!("{:b}",b)
+        // });
+        // println!("--");
         let iter : Box<dyn Iterator<Item = u8>>= Box::new(input.into_iter());
         iter.enumerate().peekable()
     }
@@ -295,5 +323,20 @@ mod test{
 
         let data = output_builder.take_result().pop().unwrap();
         assert_eq!(data.length.as_ref().unwrap().length.to_usize().unwrap(), 42);
+    }
+
+    #[test]
+    fn test_parse_content_raw(){
+        let mut input = create_input(vec![1,2,3,4]);
+        let state = ParseContent;
+        let mut output_builder = create_test_output_builder_w_id();
+        output_builder.add_length(Length::from_usize(4));
+        let _next_state = state.transition(&mut input, &mut output_builder).unwrap();
+
+        let data = output_builder.take_result().pop().unwrap();
+        assert!(matches!(data.content.as_ref().unwrap(), Content::Raw(_)));
+        if let Content::Raw(len) = data.content.unwrap(){
+            assert_eq!(len.len(), 4);
+        }
     }
 }

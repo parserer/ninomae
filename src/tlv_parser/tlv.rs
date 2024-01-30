@@ -1,4 +1,4 @@
-use num::BigUint;
+use num::{BigUint, FromPrimitive};
 
 
 #[derive(Debug, Clone)]
@@ -47,6 +47,10 @@ pub struct Length{
     pub length: BigUint
 }
 impl Length{
+    pub fn from_usize(val : usize)->Length{
+        return Length { length: BigUint::from_usize(val).unwrap() }
+    }
+
     pub fn get_length_as_usize(&self) -> Option<usize>{
         todo!()
     }
