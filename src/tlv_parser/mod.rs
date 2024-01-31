@@ -1,9 +1,9 @@
 
-use std::{io::{Error, Read}, iter::{Peekable, Enumerate}, rc::Rc, cell::RefCell};
+use std::{cell::RefCell, fmt::Debug, io::{Error, Read}, iter::{Peekable, Enumerate}, rc::Rc, thread::sleep_ms};
 
-use num::{BigUint, One, Zero};
+use num::{BigInt, BigUint, One, Zero};
 
-use self::{output_builder::EncodingDataRcel, tlv::{EncodingData, Identifier, Length, Content, DataType, IdentifierClass}};
+use self::{output_builder::EncodingDataRcel, tlv::{Content, DataType, EncodingData, Identifier, IdentifierClass, Length, PrimitiveContent}};
 use self::output_builder::EncodingDataOutputBuilder;
 
 pub mod tlv;
@@ -12,7 +12,7 @@ pub mod output_builder;
 type StateInput = Peekable<Enumerate<Box<dyn Iterator<Item = u8>>>>;
 type TransitionResult = Result<Box<dyn IState>, TLVParseError>;
 
-trait IState{
+trait IState: Debug{
     fn transition(&self, input: &mut StateInput, output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult;
     fn is_finished(&self) -> bool{
         false
@@ -60,6 +60,7 @@ impl TLVParser {
     }
 }
 
+#[derive(Debug)]
 struct FinishedState;
 impl IState for FinishedState{
     fn transition(&self, input: &mut StateInput,output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult {
@@ -72,6 +73,7 @@ impl IState for FinishedState{
 
 /// This state does not consume input, will just peek and determine whether
 ///  to continue parsing or not
+#[derive(Debug)]
 struct InitialState;
 impl IState for InitialState{
     fn transition(&self, input: &mut StateInput,output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult{
@@ -95,6 +97,7 @@ const BIT_MASK_MSB: [u8; 9] = [
     0b1111_1111,
 ];
 
+#[derive(Debug)]
 struct ParseIdentifier;
 impl IState for ParseIdentifier{
     fn transition(&self, input: &mut StateInput,output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult{
@@ -168,6 +171,7 @@ impl IState for ParseIdentifier{
     }
 }
 
+#[derive(Debug)]
 struct ParseLength;
 impl IState for ParseLength{
     fn transition(&self, input: &mut StateInput,output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult{
@@ -203,36 +207,70 @@ impl IState for ParseLength{
     }
 }
 
-
+#[derive(Debug)]
 struct ParseContent;
 impl ParseContent {
-    fn parse_raw(&self, input: &mut StateInput, length: &Length, output_builder: &mut EncodingDataOutputBuilder)
-    -> Result<(), TLVParseError>{
-        if length.length.is_zero() {return Ok(());}
-
+    fn take_bytes(&self, input: &mut StateInput, length: u32) -> Result<Vec<u8>, TLVParseError> {
         let mut content = Vec::new();
         let mut count = 0;
-        while count < length.length {
+        while count < length {
             let (_pos, next) = input.next().ok_or(TLVParseError::new("Error parsing Content. Unexpected EOF"))?;
             content.push(next);
             count += 1;
         }
+        return Ok(content);
+    }
+ 
+    fn parse_raw(&self, input: &mut StateInput, length: &Length, output_builder: &mut EncodingDataOutputBuilder)
+    -> Result<(), TLVParseError>{
+        if length.length.is_zero() {return Ok(());}
+
+        let content = self.take_bytes(input, length.length)?;
         output_builder.add_content(Content::Raw(content));
         return Ok(());
     }
+
+    fn parse_boolean(&self, input: &mut StateInput, length: &Length, output_builder: &mut EncodingDataOutputBuilder)
+    -> Result<(), TLVParseError>{
+        if !length.length.is_one() {return Err(TLVParseError::new("Boolean values should have only 1 byte"));}
+
+        let (_pos, next) = input.next().ok_or(TLVParseError::new("Error parsing Content. Unexpected EOF"))?;
+        output_builder.add_content(Content::Primitive(PrimitiveContent::Boolean(if next == 0xFF {true} else {false})));
+        return Ok(());
+    }
+
+    fn parse_integer(&self, input: &mut StateInput, length: &Length, output_builder: &mut EncodingDataOutputBuilder)
+    -> Result<(), TLVParseError>{
+        if length.length.is_zero() {return Err(TLVParseError::new("Integer should have at least 1 byte"));}
+
+        let content = self.take_bytes(input, length.length)?;
+        output_builder.add_content(Content::Primitive(PrimitiveContent::Integer(BigInt::from_signed_bytes_be(&content))));
+        return Ok(());
+    }
 }
+
 impl IState for ParseContent{
     fn transition(&self, input: &mut StateInput, output_builder: &mut EncodingDataOutputBuilder) -> TransitionResult {
         // check prev tag, whether it is constructed or not
         let cur_data = output_builder.get_cur_data().ok_or(TLVParseError::new("Parsing content without ownner"))?;
 
         if cur_data.borrow().identifier.data_type == DataType::Primitive{
-            let length = cur_data.borrow().length.clone().ok_or(TLVParseError::new("Owner does not have length defined"))?;
             // parse primitive value
-            match self.parse_raw(input, &length, output_builder){
-                Ok(())=>(),
-                Err(e) => return Err(e)
-            };
+            let length = cur_data.borrow().length.clone().ok_or(TLVParseError::new("Owner does not have length defined"))?;
+            // get tag number and whether tag is universal
+            let tag_number = cur_data.borrow().identifier.tag_number;
+            let is_universal = cur_data.borrow().identifier.class == IdentifierClass::Universal;
+            
+            if is_universal { 
+                // there are several universally defined tags for a primitive type
+                match tag_number{
+                    1 => self.parse_boolean(input, &length, output_builder)?,
+                    2 => self.parse_integer(input, &length, output_builder)?,
+                    _ => self.parse_raw(input, &length, output_builder)?
+                }
+            } else {
+                self.parse_raw(input, &length, output_builder)?;
+            }
         }
 
         return  Ok(Box::new(ParseIdentifier));    
@@ -245,7 +283,7 @@ mod test{
 
     use num::{BigInt, FromPrimitive, ToPrimitive, BigUint, Zero, traits::ToBytes};
 
-    use crate::tlv_parser::{tlv::{DataType, IdentifierClass, Length}, ParseContent, ParseLength};
+    use crate::tlv_parser::{tlv::{DataType, IdentifierClass, Length, PrimitiveContent}, ParseContent, ParseLength};
 
     use super::{ParseIdentifier, IState, output_builder::EncodingDataOutputBuilder, StateInput, tlv::{Content, Identifier}};
 
@@ -265,6 +303,15 @@ mod test{
             class: IdentifierClass::Universal,
             data_type: DataType::Primitive,
             tag_number: 0
+        });
+        builder
+    }
+    fn create_test_output_builder_w_universal_prim_id(tag_num: u32) -> EncodingDataOutputBuilder{
+        let mut builder = EncodingDataOutputBuilder::new();
+        builder.add_identifier(Identifier{
+            class: IdentifierClass::Universal,
+            data_type: DataType::Primitive,
+            tag_number: tag_num
         });
         builder
     }
@@ -369,5 +416,74 @@ mod test{
         if let Content::Raw(len) = data.content.unwrap(){
             assert_eq!(len.len(), 4);
         }
+    }
+
+    #[test]
+    fn test_parse_content_boolean_true(){
+        let mut input = create_input(vec![0xff]);
+        let state = ParseContent;
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(1);
+        output_builder.add_length(Length::new(1));
+        let _next_state = state.transition(&mut input, &mut output_builder).unwrap();
+
+        let data = output_builder.take_result().pop().unwrap();
+        match data.content.unwrap() {
+            Content::Primitive(PrimitiveContent::Boolean(val)) => {
+                assert!(val);
+            }
+            v => panic!("{:#?}", v) 
+        }
+    }
+
+    #[test]
+    fn test_parse_content_boolean_false(){
+        let mut input = create_input(vec![0xfe]);
+        let state = ParseContent;
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(1);
+        output_builder.add_length(Length::new(1));
+        let _next_state = state.transition(&mut input, &mut output_builder).unwrap();
+
+        let data = output_builder.take_result().pop().unwrap();
+        match data.content.unwrap() {
+            Content::Primitive(PrimitiveContent::Boolean(val)) => {
+                assert!(!val);
+            }
+            v => panic!("{:#?}", v) 
+        }
+    }
+
+    #[test]
+    fn test_parse_content_boolean_wronglength(){
+        let mut input = create_input(vec![0xfe]);
+        let state = ParseContent;
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(1);
+        output_builder.add_length(Length::new(2));
+        let _next_state = state.transition(&mut input, &mut output_builder).expect_err("");
+    }
+
+    #[test]
+    fn test_parse_content_int(){
+        let mut input = create_input(vec![0xff, 0xff, 0xff, 0xff]);
+        let state = ParseContent;
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(2);
+        output_builder.add_length(Length::new(4));
+        let _next_state = state.transition(&mut input, &mut output_builder).unwrap();
+
+        let data = output_builder.take_result().pop().unwrap();
+        match data.content.unwrap() {
+            Content::Primitive(PrimitiveContent::Integer(val)) => {
+                assert_eq!(val, BigInt::from(-1));
+            }
+            v => panic!("{:#?}", v) 
+        }
+    }
+
+    #[test]
+    fn test_parse_content_int_wronglength(){
+        let mut input = create_input(vec![0xfe]);
+        let state = ParseContent;
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(2);
+        output_builder.add_length(Length::new(0));
+        let _next_state = state.transition(&mut input, &mut output_builder).expect_err("");
     }
 }
