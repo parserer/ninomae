@@ -15,9 +15,10 @@ impl fmt::Display for Error {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Data {
     Integer(i64),
+    VisibleString(String),
     Sequence(Vec<Data>),
     True,
     False,
@@ -31,27 +32,30 @@ struct CertificateData {
     signature_algo: String
 }
 
-static EMPTY: D = D::Contents(vec![]);
-
-// encode  ??
-// let bytes: Vec<u8> = cd.into();
+/// ```
+/// let encoded: Vec<u8> = CertificateData::default().into();
+/// ```
 impl Into<Vec<u8>> for CertificateData {
     fn into(self) -> Vec<u8> {
+        use Data::*;
         // let version = der::encode_int(self.version.into());
-        let signature_algo = der::encode_string(self.signature_algo);
-        unimplemented!()
+        let signature_algo = der::encode(&VisibleString(self.signature_algo));
+        signature_algo
     }
 }
 
-impl<'a> From<CertificateData> for Tlv<'a> {
-    fn from(data: CertificateData) -> Tlv<'a> {
-        // let version = der::encode_int(data.version.into());
-        let signature_algo = der::encode_string(data.signature_algo);
-
-        Tlv {
-            tag: Tag::Eoc,
-            value: &EMPTY
-        }
+/// ```
+/// let decoded = CertificateData::from(vec![0_u8]);
+/// ```
+impl From<Vec<u8>> for CertificateData {
+    fn from(mut data: Vec<u8>) -> Self {
+        // assert (?? while consuming) struct tag, maybe len
+        let data_iter = data.iter_mut();
+        // CertificateData {
+        //     version: data_iter.take(n) |> der::decode
+        //     signature_algo: data_iter.take(n) |> der::decode
+        // }
+        unimplemented!()
     }
 }
 
@@ -68,59 +72,6 @@ impl Tag {
             _ => unimplemented!()
         }
     }
-}
-
-#[derive(Debug)]
-enum D<'a> {
-    Contents(Vec<u8>),
-    Value(&'a Tlv<'a>)
-}
-impl D<'_> {
-    fn len(&self) -> usize {
-        match self {
-            Self::Contents(d) => d.len(),
-            Self::Value(d) => d.len()
-        }
-    }
-}
-#[derive(Debug)]
-pub struct Tlv<'a> {
-    tag: Tag,
-    value: &'a D<'a>
-}
-impl<'a> Tlv<'a> {
-    fn default() -> Self {
-        Tlv {
-            tag: Tag::Eoc,
-            value: &EMPTY
-        }
-    }
-    fn len(&self) -> usize {
-        self.tag.len() + self.value.len()
-    }
-}
-
-/// Parser
-///
-/// ```
-/// let tlv = Tlv::try_from(bytes)?;
-/// ```
-impl TryFrom<Vec<u8>> for Tlv<'_> {
-    type Error = ();
-    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        let mut bytes = value.iter();
-        bytes.next();
-        Ok(Tlv::default())
-    }
-}
-
-
-// let bytes: Vec<u8> = tlv.into();
-impl Into<Vec<u8>> for Tlv<'_> {
-    fn into(self) -> Vec<u8> {
-        unimplemented!()
-    }
-
 }
 
 // trait Encode {
@@ -157,12 +108,18 @@ mod tests {
     use super::*;
     use Data::*;
 
-    // #[test]
-    // fn test_roundabout() {
-    //     assert_eq!(der::decode(vec![2, 1, 11]), 11);
-    //     assert_eq!(der::decode(der::encode_int(11)), 11);
-    //     // assert_eq!(der::decode(der::encode_true()), true);
-    // }
+    #[test]
+    fn test_roundabout() {
+        assert_eq!(
+            der::decode(der::encode(&False)),
+            Some(False));
+        assert_eq!(
+            der::decode(der::encode(&True)),
+            Some(True));
+        assert_eq!(
+            der::decode(der::encode(&Integer(11))),
+            Some(Integer(11)));
+    }
 
     #[test]
     fn test_div_ceil() {
@@ -176,7 +133,7 @@ mod tests {
         assert_eq!(pad("101010101").len(), 16);
     }
     #[test]
-    fn der_encode() {
+    fn der_encode_length() {
         assert_eq!(der::encode_length(1), vec![1]);
         assert_eq!(der::encode_length(435), vec![130, 1, 179]);
     }
@@ -192,36 +149,40 @@ mod tests {
             der::encode(&Integer(2)),
             vec![2, 1, 0x2]);
 
-        // assert_eq!(
-        //     der::encode(&Integer(-2)),
-        //     vec![]);
+        assert_eq!(
+            der::encode(&Integer(-2)),
+            vec![2, 1, 0b11111110]);
 
+    }
+    #[test]
+    fn str_sequence() {
         // assert_eq!(
-        //     der::encode(&Sequence(vec![Integer(12), Integer(12)])).len(),
-        //     18);
+        der::encode(&Sequence(vec![VisibleString("Jones".into()), VisibleString("1230".into())]));
+        // ?? impl Debug to print 0x not decimal
     }
 }
 
-enum Contents {
-    Bytes(Vec<u8>),
-    Nested(Seq)
-}
-pub struct Seq {
-    tag: Tag,
-    contents: Box<Contents>
-}
-// well formed Seq has Bytes as inner most. like cons
+// enum Contents {
+//     Bytes(Vec<u8>),
+//     Nested(Seq)
+// }
+// pub struct Seq {
+//     tag: Tag,
+//     contents: Box<Contents>
+// }
+// // well formed Seq has Bytes as inner most. like cons
 
 mod der {
     use itertools::Itertools;
     use super::*;
+    use Data::*;
 
     pub fn encode(data: &Data) -> Vec<u8> {
-        use Data::*;
         match data {
             True => vec![1, 1, 0xFF],
             False => vec![1, 1, 0],
             Integer(z) => encode_int(*z),
+            VisibleString(s) => encode_restricted_str(s),
             Null => vec![5, 0],
             Sequence(ds) => {
                 let contents: Vec<_> = ds.iter().map(encode).flatten().collect();
@@ -239,7 +200,7 @@ mod der {
             // ?? magic
             vec![2, 1, data as u8]
         } else {
-            // Intuitively, two's complement means "flipping, adding 1, ignoring overflow". This
+            // Informally, two's complement means "flipping, adding 1, ignoring overflow". This
             // happens to be how Rust represent numbers in memory; implementation of the spec's
             // rule for encoding signed integer is the following one line.
             let byte_array = data.to_be_bytes();
@@ -248,16 +209,26 @@ mod der {
         }
     }
 
-    fn encode_bitstring(data: &str) -> Vec<u8> {
-        unimplemented!()
+    pub fn encode_restricted_str(data: &str) -> Vec<u8> {
+        // ?? assume ascii
+        // VisibleString primitive
+        let contents = data.as_bytes();
+        [&[0x1A, contents.len() as u8], &contents[..]].concat()
     }
 
-    pub fn decode(bytes: Vec<u8>) -> Data {
+    pub fn decode(bytes: Vec<u8>) -> Option<Data> {
         match bytes.first() {
-            Some(1) => unimplemented!(),
+            Some(1) => {
+                if *bytes.get(2).expect("todo") == 0 {
+                    return Some(False);
+                }
+                // ?? length, contents skipped
+                Some(True)
+            }
             Some(2) => {
-                let contents = &bytes[2..];
-                Data::Integer(contents[0].into())
+                let contents: [u8; 1] = (&bytes[2..]).try_into().expect("todo");
+
+                Some(Integer(u8::from_be_bytes(contents).into()))
             }
             _ => unimplemented!()
         }
@@ -296,26 +267,18 @@ mod der {
 /// cargo r --example build_x509 > out.pem && cat out.pem
 /// ```
 fn main() {
-
-    let tt = Tlv {
-        tag: Tag::Boolean,
-        value: &D::Contents(vec![9])
-    };
-    println!("tt: {:?}", tt);
-    println!("len: {:?}", tt.len());
-    // let xx: u8 = 260;
+    let zz = der::decode(vec![2, 1, 0x2]);
     let xx: Vec<u8> = vec![0x30];
     // println!("{:08b}", (0i8).to_be_bytes()[0]);
-    for byt in (0i64).to_be_bytes() {
-        print!("{:b}", byt);
+    for byt in ("J😭ones").as_bytes() {
+        print!("{:x}", byt);
+    }
+    println!("");
+    for byt in der::encode_restricted_str("J😭ones") {
+        print!("{:x}", byt);
     }
     println!("");
     for byt in (-1i64).to_be_bytes() {
-        print!("{:b}", byt);
-    }
-    println!("");
-
-    for byt in (-2i64).to_be_bytes() {
         print!("{:b}", byt);
     }
     println!("");
