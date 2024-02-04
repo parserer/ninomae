@@ -4,7 +4,10 @@
 #![allow(unreachable_code)]
 use std::fmt;
 use std::convert::{From, Into, TryFrom};
+use std::slice::IterMut;
 use base64::prelude::*;
+use tracing::{info, Level};
+use tracing_subscriber::FmtSubscriber;
 
 #[derive(Debug)]
 struct Error;
@@ -45,34 +48,59 @@ impl Into<Vec<u8>> for CertificateData {
 }
 
 /// ```
-/// let decoded = CertificateData::from(vec![0_u8]);
+/// let decoded = CertificateData::from(vec![0_u8]).unwrap();
 /// ```
-impl From<Vec<u8>> for CertificateData {
-    fn from(mut data: Vec<u8>) -> Self {
-        // assert (?? while consuming) struct tag, maybe len
-        let data_iter = data.iter_mut();
-        // CertificateData {
-        //     version: data_iter.take(n) |> der::decode
-        //     signature_algo: data_iter.take(n) |> der::decode
-        // }
-        unimplemented!()
+impl TryFrom<Vec<u8>> for CertificateData {
+    type Error = &'static str;
+
+    fn try_from(mut bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        let mut bytes_iter = bytes.iter_mut();
+
+        bytes_iter.next();
+        // assert first input byte
+        bytes_iter.next();  // ?? multi-byte length
+
+        let (version, signature_algo) = {
+            (0, String::new())
+        };
+
+        let cd = CertificateData { version, signature_algo };
+        Ok(cd)
     }
 }
 
 #[derive(Debug)]
 enum Tag {
     Eoc,
-    Boolean,
-    Int
+    Bool,
+    Int,
+    Seq
 }
-impl Tag {
-    fn len(&self) -> usize {
+
+impl Into<u8> for Tag {
+    fn into(self) -> u8 {
         match self {
-            Self::Boolean => 1,
-            _ => unimplemented!()
+            Tag::Eoc => 0,
+            Tag::Bool => 1,
+            Tag::Int => 2,
+            Tag::Seq => 0x30
         }
     }
 }
+
+impl TryFrom<u8> for Tag {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Tag::Eoc),
+            1 => Ok(Tag::Bool),
+            2 => Ok(Tag::Int),
+            _ => Err("unexpected Tag byte")
+        }
+    }
+}
+
 
 // trait Encode {
 //     /// ## DER extensions to BER
@@ -107,18 +135,40 @@ fn pad(src: &str) -> String {
 mod tests {
     use super::*;
     use Data::*;
+    use test_log::test;
+    use proptest::prelude::*;
+
+    fn decodew(input: Vec<u8>) -> Data {
+        der::decode(input).unwrap()
+    }
+    fn encodew(input: Data) -> Vec<u8> {
+        der::encode(&input)
+    }
+
+    // proptest! {
+    //     #[test]
+    //     fn roundtrip(z: i64) {
+    //         prop_assert_eq!(
+    //             Data::Integer(z),
+    //             decodew(encodew(Data::Integer(z))));
+    //     }
+    // }
+
 
     #[test]
     fn test_roundabout() {
         assert_eq!(
             der::decode(der::encode(&False)),
-            Some(False));
+            Ok(False));
         assert_eq!(
             der::decode(der::encode(&True)),
-            Some(True));
+            Ok(True));
         assert_eq!(
-            der::decode(der::encode(&Integer(11))),
-            Some(Integer(11)));
+            der::decode(der::encode(&Integer(255))),
+            Ok(Integer(255)));
+        assert_eq!(
+            der::decode(der::encode(&Integer(0))),
+            Ok(Integer(0)));
     }
 
     #[test]
@@ -158,19 +208,8 @@ mod tests {
     fn str_sequence() {
         // assert_eq!(
         der::encode(&Sequence(vec![VisibleString("Jones".into()), VisibleString("1230".into())]));
-        // ?? impl Debug to print 0x not decimal
     }
 }
-
-// enum Contents {
-//     Bytes(Vec<u8>),
-//     Nested(Seq)
-// }
-// pub struct Seq {
-//     tag: Tag,
-//     contents: Box<Contents>
-// }
-// // well formed Seq has Bytes as inner most. like cons
 
 mod der {
     use itertools::Itertools;
@@ -179,15 +218,14 @@ mod der {
 
     pub fn encode(data: &Data) -> Vec<u8> {
         match data {
-            True => vec![1, 1, 0xFF],
-            False => vec![1, 1, 0],
+            True => vec![Tag::Bool.into(), 1, 0xFF],
+            False => vec![Tag::Bool.into(), 1, 0],
             Integer(z) => encode_int(*z),
             VisibleString(s) => encode_restricted_str(s),
             Null => vec![5, 0],
             Sequence(ds) => {
                 let contents: Vec<_> = ds.iter().map(encode).flatten().collect();
-                // ?? magic  Data::False.into()
-                [&[0x30, contents.len() as u8], &contents[..]].concat()
+                [&[Tag::Seq.into(), contents.len() as u8], &contents[..]].concat()
             },
         }
     }
@@ -196,16 +234,19 @@ mod der {
     // if contents.len() > 1: 1st octet and bit 8 of 2nd octet shall not be all ones or all zeros
     // ?? property check
     fn encode_int(data: i64) -> Vec<u8> {
-        if data < 255 {  // if positive and fits in 1 octet
-            // ?? magic
-            vec![2, 1, data as u8]
+        if data < 255 {
+            // Small positives and fit in 1 octet.
+            vec![Tag::Int.into(), 1, data as u8]
         } else {
             // Informally, two's complement means "flipping, adding 1, ignoring overflow". This
             // happens to be how Rust represent numbers in memory; implementation of the spec's
             // rule for encoding signed integer is the following one line.
             let byte_array = data.to_be_bytes();
 
-            [&[2, byte_array.len() as u8], &byte_array[..]].concat()
+            // [&[Tag::Int.into(), byte_array.len() as u8], &byte_array[..]].concat()
+            let res = [&[Tag::Int.into(), byte_array.len() as u8], &byte_array[..]].concat();
+            println!("res: {:?}", res);
+            res
         }
     }
 
@@ -216,21 +257,43 @@ mod der {
         [&[0x1A, contents.len() as u8], &contents[..]].concat()
     }
 
-    pub fn decode(bytes: Vec<u8>) -> Option<Data> {
-        match bytes.first() {
-            Some(1) => {
-                if *bytes.get(2).expect("todo") == 0 {
-                    return Some(False);
-                }
-                // ?? length, contents skipped
-                Some(True)
-            }
-            Some(2) => {
-                let contents: [u8; 1] = (&bytes[2..]).try_into().expect("todo");
+    pub fn decode(mut bytes: Vec<u8>) -> Result<Data, &'static str> {
 
-                Some(Integer(u8::from_be_bytes(contents).into()))
+        let mut bytes_iter = bytes.iter().peekable();
+
+        let tag = match bytes_iter.next_if(|&x| Tag::try_from(*x).is_ok()) {
+            None => return Err("tag"),
+            tag_ref => *tag_ref.unwrap()
+        };
+
+        let length = match bytes_iter.next() {
+            None => return Err("length"),
+            Some(x) => *x as usize
+        };
+
+        // Destructure collected `bytes_iter` iterator into
+        // `[contents: [u8;length], bytes]`.
+        let mut contents: Vec<u8> = bytes_iter.map(|x| *x).collect();
+        let _ = std::mem::replace(&mut bytes, contents.drain(length..).collect());
+
+        match tag {
+            0x1 => {
+                match contents.get(0) {
+                    Some(0x0) => Ok(False),
+                    _ => Ok(True),
+                }
             }
-            _ => unimplemented!()
+            0x2 => {
+                let contents_arr: Result<[u8; 8], _> = contents[..].try_into();
+                match contents_arr {
+                    Ok(arr) => {
+                        let z = i64::from_be_bytes(arr);
+                        Ok(Integer(z.into()))
+                    }
+                    _ => Err("int")
+                }
+            }
+            _ => Err("else")
         }
     }
 
@@ -267,7 +330,22 @@ mod der {
 /// cargo r --example build_x509 > out.pem && cat out.pem
 /// ```
 fn main() {
-    let zz = der::decode(vec![2, 1, 0x2]);
+    let subscriber = FmtSubscriber::builder()
+        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::TRACE)
+        // completes the builder.
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("setting default subscriber failed");
+
+    info!("preparing to shave yaks");
+    let res = der::encode(&Data::Integer(256));
+    println!("back: {:?}", der::decode(res).unwrap());
+
+    let xxj: u8 = Tag::Eoc.into();
+    println!("jjj: {:?}", xxj);
     let xx: Vec<u8> = vec![0x30];
     // println!("{:08b}", (0i8).to_be_bytes()[0]);
     for byt in ("J😭ones").as_bytes() {
