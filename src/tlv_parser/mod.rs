@@ -364,6 +364,7 @@ impl IState for ParseContent{
                 }
             } else {
                 // constructed parse nested tlvs
+                self.output.add_content(Content::Constructed(Vec::new()));
                 return  Ok(Box::<ParseIdentifier>::new(self.into()));  
             }
         } else {
@@ -373,6 +374,7 @@ impl IState for ParseContent{
                 self.parse_raw(&length)?;
             } else {
                 // constructed parse nested tlvs
+                self.output.add_content(Content::Constructed(Vec::new()));
                 return  Ok(Box::<ParseIdentifier>::new(self.into()));  
             }     
         }
@@ -737,7 +739,7 @@ mod test{
         assert_eq!(data.borrow().identifier.class, IdentifierClass::Universal);
         assert_eq!(data.borrow().identifier.data_type, DataType::Constructed);
         assert_eq!(data.borrow().identifier.tag_number, 4);
-        assert_eq!(data.borrow().length.as_ref().unwrap().length, 4);
+        assert_eq!(data.borrow().length.as_ref().unwrap().length, 8);
         match data.borrow().content.as_ref().unwrap(){
             Content::Constructed(children) => {
                 for child in children{

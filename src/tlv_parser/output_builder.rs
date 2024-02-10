@@ -105,7 +105,10 @@ impl EncodingDataOutputBuilder {
                 } else {
                     panic!("Something went wrong, data type is constructed, but content type is not of Constructed type")
                 }
+            } else {
+                panic!("Something went wrong, data type is constructed, but content is empty")
             }
+            
         } else {
             self._list_of_data.as_mut().unwrap().push(new_data.clone())
         }
