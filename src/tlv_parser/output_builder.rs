@@ -117,8 +117,7 @@ impl EncodingDataOutputBuilder {
         cur_data.borrow_mut().content = Some(content);
     }   
 
-    pub fn take_result(&mut self)->Vec<EncodingData>{
-        self._current_data=None;
+    pub fn take_result(mut self)->Vec<EncodingData>{
         self._list_of_data.take().unwrap().into_iter().map(|data| Rc::try_unwrap(data).unwrap().into_inner()).collect()
     }
 
