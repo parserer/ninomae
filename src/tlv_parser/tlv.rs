@@ -1,5 +1,5 @@
 
-use num::{BigUint, Zero, FromPrimitive, BigInt};
+use num::{Zero, BigInt};
 
 
 #[derive(Debug, Clone)]

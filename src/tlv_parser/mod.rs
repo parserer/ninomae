@@ -1,9 +1,9 @@
 
-use std::{cell::RefCell, fmt::{Debug, Display}, io::{Error, Read}, iter::{Peekable, Enumerate}, rc::Rc, thread::sleep_ms};
+use std::{fmt::{Debug}, io::{Error}, iter::{Peekable, Enumerate}};
 
-use num::{BigInt, BigUint, One, Zero};
+use num::{BigInt, One, Zero};
 
-use self::{error_collector::{ErrorCollector, IErrorCollector}, output_builder::EncodingDataRcel, tlv::{Content, DataType, EncodingData, Identifier, IdentifierClass, Length, PrimitiveContent}};
+use self::{error_collector::{ErrorCollector, IErrorCollector}, tlv::{Content, DataType, EncodingData, Identifier, IdentifierClass, Length, PrimitiveContent}};
 use self::output_builder::EncodingDataOutputBuilder;
 
 pub mod tlv;
@@ -92,7 +92,7 @@ struct FinishedState{
 
 impl IState for FinishedState{
     implem_take_results!();
-    fn transition(mut self: Box<Self>) -> TransitionResult {
+    fn transition(self: Box<Self>) -> TransitionResult {
         return Ok(Box::<FinishedState>::new(self.into()))
     }
     fn is_finished(&self) -> bool {
@@ -341,11 +341,11 @@ impl IState for ParseContent{
 #[cfg(test)]
 mod test{
 
-    use std::{any::{Any, TypeId}, ops::Deref, vec};
+    use std::{vec};
 
-    use num::{BigInt, FromPrimitive, ToPrimitive, BigUint, Zero, traits::ToBytes};
+    use num::{BigInt, ToPrimitive, Zero};
 
-    use crate::tlv_parser::{output_builder, tlv::{DataType, IdentifierClass, Length, PrimitiveContent}, ParseContent, ParseLength};
+    use crate::tlv_parser::{tlv::{DataType, IdentifierClass, Length, PrimitiveContent}, ParseContent, ParseLength};
 
     use super::{error_collector::ErrorCollector, output_builder::EncodingDataOutputBuilder, tlv::{Content, Identifier}, IState, ParseIdentifier, StateInput};
 
@@ -405,8 +405,8 @@ mod test{
 
     #[test]
     fn test_parse_identifier_universal_primitive(){
-        let mut output_builder = EncodingDataOutputBuilder::new();
-        let mut state = create_test_parseident(vec![0],output_builder);
+        let output_builder = EncodingDataOutputBuilder::new();
+        let state = create_test_parseident(vec![0],output_builder);
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
@@ -417,8 +417,8 @@ mod test{
 
     #[test]
     fn test_parse_identifier_app_constructed(){
-        let mut output_builder = EncodingDataOutputBuilder::new();
-        let mut state = create_test_parseident(vec![97],output_builder);
+        let output_builder = EncodingDataOutputBuilder::new();
+        let state = create_test_parseident(vec![97],output_builder);
         
         let _next_state = state.transition().unwrap();
 
@@ -431,8 +431,8 @@ mod test{
     #[test]
     fn test_parse_identifier_context_specific_tagnumber_single_max(){
         
-        let mut output_builder = EncodingDataOutputBuilder::new();
-        let mut state = create_test_parseident(vec![158],output_builder);
+        let output_builder = EncodingDataOutputBuilder::new();
+        let state = create_test_parseident(vec![158],output_builder);
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
@@ -442,8 +442,8 @@ mod test{
 
     #[test]
     fn test_parse_identifier_tagnumber_multiple(){
-        let mut output_builder = EncodingDataOutputBuilder::new();
-        let mut state = create_test_parseident(vec![31, 248, 188, 158, 15],output_builder);
+        let output_builder = EncodingDataOutputBuilder::new();
+        let state = create_test_parseident(vec![31, 248, 188, 158, 15],output_builder);
         
         let _next_state = state.transition().unwrap();
 
@@ -453,16 +453,16 @@ mod test{
 
     #[test]
     fn test_parse_identifier_tagnumber_morethan4bytes(){
-        let mut output_builder = EncodingDataOutputBuilder::new();
-        let mut state = create_test_parseident(vec![31, 248, 188, 158, 143, 15],output_builder);
+        let output_builder = EncodingDataOutputBuilder::new();
+        let state = create_test_parseident(vec![31, 248, 188, 158, 143, 15],output_builder);
         
         assert!(state.transition().is_err());
     }
 
     #[test]
     fn test_parse_length_1byte(){
-        let mut output_builder = create_test_output_builder_w_id();
-        let mut state = create_test_parselength(vec![42],output_builder);
+        let output_builder = create_test_output_builder_w_id();
+        let state = create_test_parselength(vec![42],output_builder);
         
         let _next_state = state.transition().unwrap();
 
@@ -472,8 +472,8 @@ mod test{
 
     #[test]
     fn test_parse_length_3bytes(){
-        let mut output_builder = create_test_output_builder_w_id();
-        let mut state = create_test_parselength(vec![0x83, 0x11, 0x11, 0x11],output_builder);
+        let output_builder = create_test_output_builder_w_id();
+        let state = create_test_parselength(vec![0x83, 0x11, 0x11, 0x11],output_builder);
         
         let _next_state = state.transition().unwrap();
 
@@ -483,8 +483,8 @@ mod test{
 
     #[test]
     fn test_parse_length_morethan4bytes(){
-        let mut output_builder = create_test_output_builder_w_id();
-        let mut state = create_test_parselength(vec![0x85, 0x11, 0x11, 0x11, 0x11, 0x11],output_builder);
+        let output_builder = create_test_output_builder_w_id();
+        let state = create_test_parselength(vec![0x85, 0x11, 0x11, 0x11, 0x11, 0x11],output_builder);
         
         assert!(state.transition().is_err());
     }
@@ -493,7 +493,7 @@ mod test{
     fn test_parse_content_raw(){
         let mut output_builder = create_test_output_builder_w_id();
         output_builder.add_length(Length::new(4));
-        let mut state = create_test_parsecontent(vec![1,2,3,4],output_builder);
+        let state = create_test_parsecontent(vec![1,2,3,4],output_builder);
         
         let _next_state = state.transition().unwrap();
 
@@ -508,7 +508,7 @@ mod test{
     fn test_parse_content_boolean_true(){
         let mut output_builder = create_test_output_builder_w_universal_prim_id(1);
         output_builder.add_length(Length::new(1));
-        let mut state = create_test_parsecontent(vec![0xff],output_builder);
+        let state = create_test_parsecontent(vec![0xff],output_builder);
         
         let _next_state = state.transition().unwrap();
 
@@ -525,7 +525,7 @@ mod test{
     fn test_parse_content_boolean_false(){
         let mut output_builder = create_test_output_builder_w_universal_prim_id(1);
         output_builder.add_length(Length::new(1));
-        let mut state = create_test_parsecontent(vec![0xfe],output_builder);
+        let state = create_test_parsecontent(vec![0xfe],output_builder);
         
         let _next_state = state.transition().unwrap();
 
@@ -542,7 +542,7 @@ mod test{
     fn test_parse_content_boolean_wronglength(){
         let mut output_builder = create_test_output_builder_w_universal_prim_id(1);
         output_builder.add_length(Length::new(2));
-        let mut state = create_test_parsecontent(vec![0xfe],output_builder);
+        let state = create_test_parsecontent(vec![0xfe],output_builder);
         
         assert!(state.transition().is_err());
     }
@@ -551,7 +551,7 @@ mod test{
     fn test_parse_content_int(){
         let mut output_builder = create_test_output_builder_w_universal_prim_id(2);
         output_builder.add_length(Length::new(4));
-        let mut state = create_test_parsecontent(vec![0xff, 0xff, 0xff, 0xff],output_builder);
+        let state = create_test_parsecontent(vec![0xff, 0xff, 0xff, 0xff],output_builder);
         
         let _next_state = state.transition().unwrap();
 
@@ -568,7 +568,7 @@ mod test{
     fn test_parse_content_int_wronglength(){
         let mut output_builder = create_test_output_builder_w_universal_prim_id(2);
         output_builder.add_length(Length::new(0));
-        let mut state = create_test_parsecontent(vec![0xfe],output_builder);
+        let state = create_test_parsecontent(vec![0xfe],output_builder);
         
         assert!(state.transition().is_err());
     }

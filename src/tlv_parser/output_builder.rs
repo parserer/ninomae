@@ -129,7 +129,7 @@ impl EncodingDataOutputBuilder {
 
 #[cfg(test)]
 mod test {
-    use num::{BigUint, Zero, FromPrimitive};
+    
 
     use crate::tlv_parser::{tlv::{Identifier, IdentifierClass, DataType, Length, Content, PrimitiveContent}, output_builder::EncodingDataOutputBuilder};
 
