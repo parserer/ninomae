@@ -388,21 +388,21 @@ mod test{
     fn create_test_parseident(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) -> ParseIdentifier{
         ParseIdentifier{
             input : create_input(input),
-            output : EncodingDataOutputBuilder::new(),
+            output : output_builder,
             errors : ErrorCollector::new()
         }
     }
     fn create_test_parselength(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) -> ParseLength{
         ParseLength{
             input : create_input(input),
-            output : EncodingDataOutputBuilder::new(),
+            output : output_builder,
             errors : ErrorCollector::new()
         }
     }
     fn create_test_parsecontent(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) -> ParseContent{
         ParseContent{
             input : create_input(input),
-            output : EncodingDataOutputBuilder::new(),
+            output : output_builder,
             errors : ErrorCollector::new()
         }
     }
