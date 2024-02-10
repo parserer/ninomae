@@ -18,7 +18,7 @@ type ParserResult = Result<(StateInput, Vec<EncodingData>, Vec<TLVParseError>), 
 
 macro_rules! implem_take_results {
     () => {
-        fn take_results(self)-> ParserResult{
+        fn take_results(self: Box<Self>)-> ParserResult{
             return Ok((self.input, self.output.take_result(), self.errors.take_errors()))
         }  
     };
@@ -26,7 +26,7 @@ macro_rules! implem_take_results {
 
 macro_rules! implem_into_state {
     ($from_state:ident, $target_state:ident) => {
-        impl Into<$target_state> for $from_state{
+        impl Into<$target_state> for Box<$from_state>{
             fn into(self) -> $target_state {
                 $target_state{input:self.input, output:self.output,errors:self.errors}
             }
@@ -35,23 +35,11 @@ macro_rules! implem_into_state {
 }
 
 trait IState {
-    fn transition(self) -> TransitionResult;
+    fn transition(self: Box<Self>) -> TransitionResult;
     fn is_finished(&self) -> bool{
         false
     }
-    fn take_results(self)-> ParserResult;
-}
-impl IState for Box<dyn IState>{
-    fn transition(self) -> TransitionResult {
-        self.transition()
-    }
-    fn is_finished(&self) -> bool {
-        self.is_finished()
-    }
-
-    fn take_results(self)-> ParserResult {
-        self.take_results()
-    }
+    fn take_results(self: Box<Self>)-> ParserResult;
 }
 
 
@@ -89,7 +77,7 @@ impl TLVParser {
     pub fn parse(mut self) -> ParserResult{
         loop {
             if self._state.is_finished(){
-                return self._state.take_results();
+                return  self._state.take_results();
             }
             self._state = self._state.transition()?;    
         }
@@ -104,11 +92,16 @@ struct FinishedState{
 
 impl IState for FinishedState{
     implem_take_results!();
-    fn transition(mut self) -> TransitionResult {
+    fn transition(mut self: Box<Self>) -> TransitionResult {
         return Ok(Box::<FinishedState>::new(self.into()))
     }
     fn is_finished(&self) -> bool {
         true
+    }
+}
+impl Into<FinishedState> for Box<FinishedState>{
+    fn into(self) -> FinishedState {
+        FinishedState{input:self.input,output:self.output,errors:self.errors}
     }
 }
 
@@ -123,7 +116,7 @@ implem_into_state!(InitialState, FinishedState);
 implem_into_state!(InitialState, ParseIdentifier);
 impl IState for InitialState{
     implem_take_results!();
-    fn transition(mut self) -> TransitionResult{
+    fn transition(mut self: Box<Self>) -> TransitionResult{
         match self.input.peek(){
             Some(_) => return Ok(Box::<ParseIdentifier>::new(self.into())),
             _=> return Ok(Box::<FinishedState>::new(self.into()))
@@ -152,7 +145,7 @@ struct ParseIdentifier{
 implem_into_state!(ParseIdentifier, ParseLength);
 impl IState for ParseIdentifier{
     implem_take_results!();
-    fn transition(mut self) -> TransitionResult{
+    fn transition(mut self: Box<Self>) -> TransitionResult{
         let (_pos, next) = self.input.next().ok_or(TLVParseError::new("Error parsing Identifier. Unexpected EOF"))?;
         // bit MSB 8-1 LSB
         // class is on bit 8-7
@@ -233,7 +226,7 @@ implem_into_state!(ParseLength, ParseContent);
 implem_into_state!(ParseLength, InitialState);
 impl IState for ParseLength{
     implem_take_results!();
-    fn transition(mut self) -> TransitionResult{
+    fn transition(mut self: Box<Self>) -> TransitionResult{
         let (_pos, next) = self.input.next().ok_or(TLVParseError::new("Error parsing Length. Unexpected EOF"))?;
         let is_length_zero;
         if (next & 0b1000_0000) != 0 {
@@ -316,7 +309,7 @@ impl ParseContent {
 
 impl IState for ParseContent{
     implem_take_results!();
-    fn transition(mut self) -> TransitionResult {
+    fn transition(mut self: Box<Self>) -> TransitionResult {
         // check prev tag, whether it is constructed or not
         let cur_data = self.output.get_cur_data().ok_or(TLVParseError::new("Parsing content without ownner"))?;
 
@@ -385,26 +378,29 @@ mod test{
         builder
     }
 
-    fn create_test_parseident(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) -> ParseIdentifier{
-        ParseIdentifier{
+    fn create_test_parseident(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) 
+    -> Box<ParseIdentifier>{
+        Box::new(ParseIdentifier{
             input : create_input(input),
             output : output_builder,
             errors : ErrorCollector::new()
-        }
+        })
     }
-    fn create_test_parselength(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) -> ParseLength{
-        ParseLength{
+    fn create_test_parselength(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) 
+    -> Box<ParseLength>{
+        Box::new(ParseLength{
             input : create_input(input),
             output : output_builder,
             errors : ErrorCollector::new()
-        }
+        })
     }
-    fn create_test_parsecontent(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) -> ParseContent{
-        ParseContent{
+    fn create_test_parsecontent(input: Vec<u8>, output_builder: EncodingDataOutputBuilder) 
+    -> Box<ParseContent>{
+        Box::new(ParseContent{
             input : create_input(input),
             output : output_builder,
             errors : ErrorCollector::new()
-        }
+        })
     }
 
     #[test]
