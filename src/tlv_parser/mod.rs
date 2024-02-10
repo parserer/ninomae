@@ -3,7 +3,7 @@ use std::{fmt::{Debug}, io::{Error}, iter::{Peekable, Enumerate}};
 
 use num::{BigInt, One, Zero};
 
-use self::{error_collector::{ErrorCollector, IErrorCollector}, tlv::{Content, DataType, EncodingData, Identifier, IdentifierClass, Length, PrimitiveContent}};
+use self::{error_collector::{ErrorCollector, IErrorCollector}, output_builder::EncodingDataRcel, tlv::{Content, DataType, EncodingData, Identifier, IdentifierClass, Length, PrimitiveContent}};
 use self::output_builder::EncodingDataOutputBuilder;
 
 pub mod tlv;
@@ -14,7 +14,7 @@ pub mod error_collector;
 
 type StateInput = Peekable<Enumerate<Box<dyn Iterator<Item = u8>>>>;
 type TransitionResult = Result<Box<dyn IState>, TLVParseError>;
-type ParserResult = Result<(StateInput, Vec<EncodingData>, Vec<TLVParseError>), TLVParseError>;
+type ParserResult = Result<(StateInput, Vec<EncodingDataRcel>, Vec<TLVParseError>), TLVParseError>;
 
 macro_rules! implem_take_results {
     () => {
@@ -305,6 +305,36 @@ impl ParseContent {
         self.output.add_content(Content::Primitive(PrimitiveContent::Integer(BigInt::from_signed_bytes_be(&content))));
         return Ok(());
     }
+
+    fn parse_bitstring_primitive(&mut self, length: &Length)
+    -> Result<(), TLVParseError>{
+        if length.length.is_zero() {return Err(TLVParseError::new("Bitstring should have at least 1 byte"));}
+        
+        let num_unused_bits = self.take_bytes(1)?.pop().unwrap();
+        let content = self.take_bytes(length.length-1)?;
+        self.output.add_content(Content::Primitive(PrimitiveContent::BitString((content, num_unused_bits))));
+        return Ok(());
+    }
+
+    fn parse_utf8string(&mut self, length: &Length)
+    -> Result<(), TLVParseError>{
+
+        let content = self.take_bytes(length.length)?;
+        let utf8string = String::from_utf8_lossy(&content);
+        self.output.add_content(Content::Primitive(PrimitiveContent::UTF8String(utf8string.to_string())));
+        return Ok(());
+    }
+
+    fn parse_null(&mut self, length: &Length)
+    -> Result<(), TLVParseError>{
+        if !length.length.is_zero() {
+            // warning length should be zero
+            self.errors.add(TLVParseError::new("Null value should have no content"))
+        }
+        // what to do when not zero?
+        self.output.add_content(Content::Primitive(PrimitiveContent::Null));
+        return Ok(());
+    }
 }
 
 impl IState for ParseContent{
@@ -313,27 +343,38 @@ impl IState for ParseContent{
         // check prev tag, whether it is constructed or not
         let cur_data = self.output.get_cur_data().ok_or(TLVParseError::new("Parsing content without ownner"))?;
 
-        if cur_data.borrow().identifier.data_type == DataType::Primitive{
-            // parse primitive value
-            let length = cur_data.borrow().length.clone().ok_or(TLVParseError::new("Owner does not have length defined"))?;
+        let tag_number = cur_data.borrow().identifier.tag_number;
+        let is_universal = cur_data.borrow().identifier.class == IdentifierClass::Universal;
+        let is_primitive = cur_data.borrow().identifier.data_type == DataType::Primitive;
+        let length = cur_data.borrow().length.clone().ok_or(TLVParseError::new("Owner does not have length defined"))?;
+
+        if is_universal {
+            // parse universal value
+
             // get tag number and whether tag is universal
-            let tag_number = cur_data.borrow().identifier.tag_number;
-            let is_universal = cur_data.borrow().identifier.class == IdentifierClass::Universal;
-            
-            if is_universal { 
+            if is_primitive { 
                 // there are several universally defined tags for a primitive type
                 match tag_number{
                     1 => self.parse_boolean(&length)?,
                     2 => self.parse_integer(&length)?,
+                    3 => self.parse_bitstring_primitive(&length)?,
+                    4 => self.parse_utf8string(&length)?,
+                    5 => self.parse_null(&length)?,
                     _ => self.parse_raw(&length)?
                 }
             } else {
-                // just keep bytes,
-                self.parse_raw(&length)?;
+                // constructed parse nested tlvs
+                return  Ok(Box::<ParseIdentifier>::new(self.into()));  
             }
         } else {
-            // constructed parse nested tlvs
-            return  Ok(Box::<ParseIdentifier>::new(self.into()));  
+            if is_primitive { 
+                // type depends on schema, keep as raw bytes for now
+                // TODO some types (bitstring, utf8string) have constructed counterparts
+                self.parse_raw(&length)?;
+            } else {
+                // constructed parse nested tlvs
+                return  Ok(Box::<ParseIdentifier>::new(self.into()));  
+            }     
         }
         return  Ok(Box::<InitialState>::new(self.into()));    
     }
@@ -343,11 +384,12 @@ mod test{
 
     use std::{vec};
 
-    use num::{BigInt, ToPrimitive, Zero};
+    use clap::parser;
+    use num::{BigInt, FromPrimitive, ToPrimitive, Zero};
 
     use crate::tlv_parser::{tlv::{DataType, IdentifierClass, Length, PrimitiveContent}, ParseContent, ParseLength};
 
-    use super::{error_collector::ErrorCollector, output_builder::EncodingDataOutputBuilder, tlv::{Content, Identifier}, IState, ParseIdentifier, StateInput};
+    use super::{error_collector::ErrorCollector, output_builder::EncodingDataOutputBuilder, tlv::{Content, EncodingData, Identifier}, IState, ParseIdentifier, StateInput, TLVParser};
 
 
     fn create_input(input: Vec<u8>) -> StateInput{
@@ -410,9 +452,9 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        assert_eq!(data.identifier.class, IdentifierClass::Universal);
-        assert_eq!(data.identifier.data_type, DataType::Primitive);
-        assert!(data.identifier.tag_number.is_zero());
+        assert_eq!(data.borrow().identifier.class, IdentifierClass::Universal);
+        assert_eq!(data.borrow().identifier.data_type, DataType::Primitive);
+        assert!(data.borrow().identifier.tag_number.is_zero());
     }
 
     #[test]
@@ -423,9 +465,9 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        assert_eq!(data.identifier.class, IdentifierClass::Application);
-        assert_eq!(data.identifier.data_type, DataType::Constructed);
-        assert_eq!(data.identifier.tag_number.to_usize().unwrap(), 1);
+        assert_eq!(data.borrow().identifier.class, IdentifierClass::Application);
+        assert_eq!(data.borrow().identifier.data_type, DataType::Constructed);
+        assert_eq!(data.borrow().identifier.tag_number.to_usize().unwrap(), 1);
     }
 
     #[test]
@@ -436,8 +478,8 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        assert_eq!(data.identifier.class, IdentifierClass::ContextSpecific);
-        assert_eq!(data.identifier.tag_number.to_usize().unwrap(), 30);
+        assert_eq!(data.borrow().identifier.class, IdentifierClass::ContextSpecific);
+        assert_eq!(data.borrow().identifier.tag_number.to_usize().unwrap(), 30);
     }
 
     #[test]
@@ -448,7 +490,7 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        assert_eq!(data.identifier.tag_number, 4042322160);
+        assert_eq!(data.borrow().identifier.tag_number, 4042322160);
     }
 
     #[test]
@@ -467,7 +509,7 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        assert_eq!(data.length.as_ref().unwrap().length.to_usize().unwrap(), 42);
+        assert_eq!(data.borrow().length.as_ref().unwrap().length.to_usize().unwrap(), 42);
     }
 
     #[test]
@@ -478,7 +520,7 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        assert_eq!(data.length.as_ref().unwrap().length, 1_118_481);
+        assert_eq!(data.borrow().length.as_ref().unwrap().length, 1_118_481);
     }
 
     #[test]
@@ -498,10 +540,10 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        assert!(matches!(data.content.as_ref().unwrap(), Content::Raw(_)));
-        if let Content::Raw(len) = data.content.unwrap(){
+        assert!(matches!(data.borrow().content.as_ref().unwrap(), Content::Raw(_)));
+        if let Content::Raw(len) = data.borrow().content.as_ref().unwrap(){
             assert_eq!(len.len(), 4);
-        }
+        };
     }
 
     #[test]
@@ -513,12 +555,12 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        match data.content.unwrap() {
+        match data.borrow().content.as_ref().unwrap() {
             Content::Primitive(PrimitiveContent::Boolean(val)) => {
                 assert!(val);
             }
             v => panic!("{:#?}", v) 
-        }
+        };
     }
 
     #[test]
@@ -530,12 +572,12 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        match data.content.unwrap() {
+        match data.borrow().content.as_ref().unwrap() {
             Content::Primitive(PrimitiveContent::Boolean(val)) => {
                 assert!(!val);
             }
             v => panic!("{:#?}", v) 
-        }
+        };
     }
 
     #[test]
@@ -556,12 +598,12 @@ mod test{
         let _next_state = state.transition().unwrap();
 
         let data = _next_state.take_results().unwrap().1.pop().unwrap();
-        match data.content.unwrap() {
+        match data.borrow().content.as_ref().unwrap() {
             Content::Primitive(PrimitiveContent::Integer(val)) => {
-                assert_eq!(val, BigInt::from(-1));
+                assert_eq!(val, &BigInt::from(-1));
             }
             v => panic!("{:#?}", v) 
-        }
+        };
     }
 
     #[test]
@@ -571,5 +613,147 @@ mod test{
         let state = create_test_parsecontent(vec![0xfe],output_builder);
         
         assert!(state.transition().is_err());
+    }
+
+    #[test]
+    fn test_parse_content_bitstring_empty(){
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(3);
+        output_builder.add_length(Length::new(1));
+        let state = create_test_parsecontent(vec![0x00],output_builder);
+        
+        let _next_state = state.transition().unwrap();
+
+        let data = _next_state.take_results().unwrap().1.pop().unwrap();
+        match data.borrow().content.as_ref().unwrap() {
+            Content::Primitive(PrimitiveContent::BitString((val, num_unused))) => {
+                assert_eq!(val.len(), 0);
+                assert_eq!(num_unused, &0);
+            }
+            v => panic!("{:#?}", v) 
+        };
+    }
+
+    #[test]
+    fn test_parse_content_bitstring_5b(){
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(3);
+        output_builder.add_length(Length::new(6));
+        let state = create_test_parsecontent(vec![0x07, 0x00, 0x01, 0x02, 0x03, 0x04,],output_builder);
+        
+        let _next_state = state.transition().unwrap();
+
+        let data = _next_state.take_results().unwrap().1.pop().unwrap();
+        match data.borrow().content.as_ref().unwrap() {
+            Content::Primitive(PrimitiveContent::BitString((val, num_unused))) => {
+                assert_eq!(val.len(), 5);
+                assert_eq!(*num_unused, 7);
+            }
+            v => panic!("{:#?}", v) 
+        };
+    }
+
+    #[test]
+    fn test_parse_content_utf8string(){
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(4);
+        output_builder.add_length(Length::new(5));
+        let state = create_test_parsecontent("hello".to_string().into_bytes(),output_builder);
+        
+        let _next_state = state.transition().unwrap();
+
+        let data = _next_state.take_results().unwrap().1.pop().unwrap();
+        match data.borrow().content.as_ref().unwrap() {
+            Content::Primitive(PrimitiveContent::UTF8String(val)) => {
+                assert_eq!(val.len(), 5);
+            }
+            v => panic!("{:#?}", v) 
+        };
+    }
+
+    #[test]
+    fn test_parse_content_null(){
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(5);
+        output_builder.add_length(Length::new(0));
+        let state = create_test_parsecontent(vec![],output_builder);
+        
+        let _next_state = state.transition().unwrap();
+
+        let data = _next_state.take_results().unwrap().1.pop().unwrap();
+        match data.borrow().content.as_ref().unwrap() {
+            Content::Primitive(PrimitiveContent::Null) => {
+
+            }
+            v => panic!("{:#?}", v) 
+        };
+    }
+
+    #[test]
+    fn test_parse_content_null_nzlength(){
+        let mut output_builder = create_test_output_builder_w_universal_prim_id(5);
+        output_builder.add_length(Length::new(1));
+        let state = create_test_parsecontent(vec![],output_builder);
+        
+        let _next_state = state.transition().unwrap();
+
+        let mut result = _next_state.take_results().unwrap();
+        let data  = result.1.pop().unwrap();
+        match data.borrow().content.as_ref().unwrap() {
+            Content::Primitive(PrimitiveContent::Null) => {
+                assert_eq!(result.2.len(), 1)
+            }
+            v => panic!("{:#?}", v) 
+        };
+    }
+
+    #[test]
+    fn test_parse_tlv_integer(){
+        let input = vec![0x02, 0x04, 0x01, 0x02, 0x03, 0x04];
+        let parser = TLVParser::new(Box::new(input.into_iter())).unwrap();
+
+        let mut result = parser.parse().unwrap();
+        let data  = result.1.pop().unwrap();
+
+        assert_eq!(data.borrow().identifier.class, IdentifierClass::Universal);
+        assert_eq!(data.borrow().identifier.data_type, DataType::Primitive);
+        assert_eq!(data.borrow().identifier.tag_number, 2);
+        assert_eq!(data.borrow().length.as_ref().unwrap().length, 4);
+        match data.borrow().content.as_ref().unwrap() {
+            Content::Primitive(PrimitiveContent::Integer(val)) => {
+                assert_eq!(val, &BigInt::from_i32(16909060).unwrap())
+            }
+            v => panic!("{:#?}", v) 
+        };
+    }
+
+    #[test]
+    fn test_parse_tlv_constructed(){
+        let input = vec![0x24, 0x08, 
+                            0x04, 0x02, 'h' as u8, 'e' as u8,
+                            0x04, 0x02, 'h' as u8, 'e' as u8,
+                        ];
+        let parser = TLVParser::new(Box::new(input.into_iter())).unwrap();
+
+        let mut result = parser.parse().unwrap();
+        let data  = result.1.pop().unwrap();
+
+        assert_eq!(data.borrow().identifier.class, IdentifierClass::Universal);
+        assert_eq!(data.borrow().identifier.data_type, DataType::Constructed);
+        assert_eq!(data.borrow().identifier.tag_number, 4);
+        assert_eq!(data.borrow().length.as_ref().unwrap().length, 4);
+        match data.borrow().content.as_ref().unwrap(){
+            Content::Constructed(children) => {
+                for child in children{
+                    assert_eq!(child.borrow().identifier.class, IdentifierClass::Universal);
+                    assert_eq!(child.borrow().identifier.data_type, DataType::Primitive);
+                    assert_eq!(child.borrow().identifier.tag_number, 4);
+                    assert_eq!(child.borrow().length.as_ref().unwrap().length, 2);
+                    match child.borrow().content.as_ref().unwrap(){
+                        Content::Primitive(PrimitiveContent::UTF8String(val)) =>{
+                            assert_eq!(val.as_str(), "he")
+                        }
+                        v => panic!("{:#?}", v)
+                    }
+                }
+            }
+            v => panic!("{:#?}", v) 
+        };
     }
 }

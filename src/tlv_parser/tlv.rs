@@ -1,6 +1,8 @@
 
 use num::{Zero, BigInt};
 
+use super::output_builder::EncodingDataRcel;
+
 
 #[derive(Debug, Clone)]
 pub struct EncodingData{
@@ -85,7 +87,7 @@ impl Length{
 #[derive(Debug, Clone)]
 pub enum Content{
     Primitive(PrimitiveContent),
-    Constructed(Vec<EncodingData>),
+    Constructed(Vec<EncodingDataRcel>),
     // for data types not yet implemented
     Raw(Vec<u8>)
 }
@@ -93,7 +95,7 @@ impl Content {
     pub fn bytes_length(&self) -> u32{
         let len = match self {
             Content::Primitive(pc) => pc.bytes_length(),
-            Content::Constructed(children) => children.iter().fold(0, |acc, data| acc + data.bytes_length()),
+            Content::Constructed(children) => children.iter().fold(0, |acc, data| acc + data.borrow().bytes_length()),
             Content::Raw(r) => r.len() as u32
         };
         return len
@@ -106,7 +108,10 @@ pub enum PrimitiveContent{
     Boolean(bool),
     Integer(BigInt),
     OctetString(Vec<u8>),
-    UTF8String(String)
+    UTF8String(String),
+    // byte represents unused bits in last byte, should be between 1-7
+    BitString((Vec<u8>, u8)),
+    Null,
 }
 impl PrimitiveContent{
     pub fn bytes_length(&self) -> u32{
@@ -115,6 +120,8 @@ impl PrimitiveContent{
             PrimitiveContent::Integer(i) => (i.bits()/8) as u32,
             PrimitiveContent::OctetString(os) => os.len() as u32,
             PrimitiveContent::UTF8String(ut8_str) => ut8_str.len() as u32,
+            PrimitiveContent::BitString((bytes, _)) => bytes.len() as u32,
+            PrimitiveContent::Null => 0
         };
         return len
     }
