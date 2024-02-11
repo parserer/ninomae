@@ -3,6 +3,7 @@
 #![allow(unused_variables)]
 #![allow(unreachable_code)]
 use std::fmt;
+use std::collections::HashMap;
 use std::convert::{From, Into, TryFrom};
 use std::slice::IterMut;
 use base64::prelude::*;
@@ -18,7 +19,7 @@ impl fmt::Display for Error {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Data {
     Integer(i64),
     VisibleString(String),
@@ -35,37 +36,73 @@ struct CertificateData {
     signature_algo: String
 }
 
+// ?? rules for mapping of record fields are at X680 doc
+// 60 <l>
+//        42 01 03
+//        A0 0A 1A 08 "Director"
 /// ```
-/// let encoded: Vec<u8> = CertificateData::default().into();
+/// let encoded: Bytes = CertificateData::default().into();
 /// ```
-impl Into<Vec<u8>> for CertificateData {
-    fn into(self) -> Vec<u8> {
+impl Into<Bytes> for CertificateData {
+    fn into(self) -> Bytes {
         use Data::*;
-        // let version = der::encode_int(self.version.into());
+        let version = der::encode(&Integer(self.version.into()));
         let signature_algo = der::encode(&VisibleString(self.signature_algo));
-        signature_algo
+        let contents: Vec<u8> = [
+            &[0x42, 3u8], &version[..],
+            &[0xA0, 3u8], &signature_algo[..] ].concat();
+        let mut res = Bytes(contents);
+        res.slap_tag(0x60);
+        res
     }
 }
 
 /// ```
 /// let decoded = CertificateData::from(vec![0_u8]).unwrap();
 /// ```
-impl TryFrom<Vec<u8>> for CertificateData {
-    // type Error = &'static str;
+impl TryFrom<&mut Vec<u8>> for CertificateData {
     type Error = Error;
 
-    fn try_from(mut bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        let mut bytes_iter = bytes.iter_mut();
+    fn try_from(bytes: &mut Vec<u8>) -> Result<Self, Self::Error> {
+        let bytes_iter = bytes.iter_mut();
 
-        bytes_iter.next();
-        bytes_iter.next();
+        // bytes_iter.next();
+        // bytes_iter.next();
 
         let (version, signature_algo) = {
             (0, String::new())
         };
 
-        let cd = CertificateData { version, signature_algo };
-        Ok(cd)
+        Ok(CertificateData { version, signature_algo })
+    }
+}
+
+// ?? presumably we only need this until we have the asn1 spec compiler
+fn parse_certificate_record(contents: Vec<u8>) -> HashMap<&'static str, Data> {
+    // PICKUP non programmatically assign names to tlvs
+    unimplemented!()
+}
+
+impl TryFrom<&mut Bytes> for CertificateData {
+    type Error = Error;
+
+    fn try_from(bytes: &mut Bytes) -> Result<Self, Self::Error> {
+        let tag: Vec<_> = bytes.0.drain(..1).collect();
+        // ?? multi-byte length  fn decode_length
+        let length: Vec<_> = bytes.0.drain(..1).collect();
+
+        let contents: Vec<_> = bytes.0.drain(..(length[0] as usize)).collect();
+
+        let m = parse_certificate_record(contents);
+        let (d1, d2) = match (m.get("version"), m.get("signature_algo")) {
+            (Some(d1_ref), Some(d2_ref)) => (d1_ref.clone(), d2_ref.clone()),
+            _ => return Err(Error("todo"))
+        };
+
+        match (d1, d2) {
+            (Data::Integer(z), Data::VisibleString(signature_algo)) => Ok(CertificateData { version: z as u8, signature_algo }),
+            _ => Err(Error("todo"))
+        }
     }
 }
 
@@ -150,6 +187,7 @@ mod tests {
         der::encode(&input)
     }
 
+    // ok:
     // proptest! {
     //     #[test]
     //     fn roundtrip(z: i64) {
@@ -211,6 +249,14 @@ mod tests {
     }
 }
 
+struct Bytes(Vec<u8>);
+impl Bytes {
+    fn slap_tag(&mut self, tag: u8) {
+        self.0.insert(0, self.0.len() as u8);
+        self.0.insert(0, tag);
+    }
+}
+
 mod der {
     use itertools::Itertools;
     use super::*;
@@ -235,6 +281,7 @@ mod der {
     // ?? property check
     /// - [ ] [8.3.2] "... always encoded in the smallest possible number of octets."
     fn encode_int(data: i64) -> Vec<u8> {
+        // ?? test this predicate
         if data.abs() < 255 {
             // Small positives and fit in 1 octet.
             vec![Tag::Int.into(), 1, data as u8]
@@ -294,7 +341,6 @@ mod der {
                 }
             }
             0x2 => {
-                println!("cont: {:?}", contents);
                 let arr = as_array_of_8(&mut contents)?;
                 Ok(Integer(i64::from_be_bytes(arr)))
             }
@@ -351,8 +397,8 @@ fn main() {
         version: 3,
         signature_algo: String::from("sha")
     };
-    let encoded: Vec<u8> = cd.into();
-    let decoded = CertificateData::try_from(encoded);
+    let mut encoded: Bytes = cd.into();
+    let decoded = CertificateData::try_from(&mut encoded);
     println!("dec: {:?}", decoded);
 
     // for byt in ("J😭ones").as_bytes() {
