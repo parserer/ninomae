@@ -10,7 +10,7 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Debug)]
-struct Error;
+struct Error(&'static str);
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -29,7 +29,7 @@ pub enum Data {
 }
 
 /// Fields defined in version 3 of X.509.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct CertificateData {
     version: u8,
     signature_algo: String
@@ -51,14 +51,14 @@ impl Into<Vec<u8>> for CertificateData {
 /// let decoded = CertificateData::from(vec![0_u8]).unwrap();
 /// ```
 impl TryFrom<Vec<u8>> for CertificateData {
-    type Error = &'static str;
+    // type Error = &'static str;
+    type Error = Error;
 
     fn try_from(mut bytes: Vec<u8>) -> Result<Self, Self::Error> {
         let mut bytes_iter = bytes.iter_mut();
 
         bytes_iter.next();
-        // assert first input byte
-        bytes_iter.next();  // ?? multi-byte length
+        bytes_iter.next();
 
         let (version, signature_algo) = {
             (0, String::new())
@@ -131,6 +131,11 @@ fn pad(src: &str) -> String {
     };
     format!("{zeros}{src}")
 }
+    // #[test]
+    // fn test_pad() {
+    //     assert_eq!(pad("111").len(), 8);
+    //     assert_eq!(pad("101010101").len(), 16);
+    // }
 
 mod tests {
     use super::*;
@@ -156,7 +161,7 @@ mod tests {
 
 
     #[test]
-    fn test_roundabout() {
+    fn test_roundtrip() {
         assert_eq!(
             der::decode(der::encode(&False)),
             Ok(False));
@@ -176,11 +181,6 @@ mod tests {
         assert_eq!(div_ceil(10, 4), 3);
         assert_eq!(div_ceil(10, 2), 5);
         assert_eq!(div_ceil(2, 10), 1);
-    }
-    #[test]
-    fn test_pad() {
-        assert_eq!(pad("111").len(), 8);
-        assert_eq!(pad("101010101").len(), 16);
     }
     #[test]
     fn der_encode_length() {
@@ -233,8 +233,9 @@ mod der {
     // negative shall be two's complement
     // if contents.len() > 1: 1st octet and bit 8 of 2nd octet shall not be all ones or all zeros
     // ?? property check
+    /// - [ ] [8.3.2] "... always encoded in the smallest possible number of octets."
     fn encode_int(data: i64) -> Vec<u8> {
-        if data < 255 {
+        if data.abs() < 255 {
             // Small positives and fit in 1 octet.
             vec![Tag::Int.into(), 1, data as u8]
         } else {
@@ -257,8 +258,17 @@ mod der {
         [&[0x1A, contents.len() as u8], &contents[..]].concat()
     }
 
-    pub fn decode(mut bytes: Vec<u8>) -> Result<Data, &'static str> {
+    fn as_array_of_8(contents: &mut Vec<u8>) -> Result<[u8; 8], &'static str> {
+        if contents.len() != 8 {
+            // Pad left if short; cut left if long.
+            contents.reverse();
+            contents.resize(8, 0);
+            contents.reverse();
+        }
+        Ok(contents[..].try_into().expect("correct length"))
+    }
 
+    pub fn decode(mut bytes: Vec<u8>) -> Result<Data, &'static str> {
         let mut bytes_iter = bytes.iter().peekable();
 
         let tag = match bytes_iter.next_if(|&x| Tag::try_from(*x).is_ok()) {
@@ -284,14 +294,9 @@ mod der {
                 }
             }
             0x2 => {
-                let contents_arr: Result<[u8; 8], _> = contents[..].try_into();
-                match contents_arr {
-                    Ok(arr) => {
-                        let z = i64::from_be_bytes(arr);
-                        Ok(Integer(z.into()))
-                    }
-                    _ => Err("int")
-                }
+                println!("cont: {:?}", contents);
+                let arr = as_array_of_8(&mut contents)?;
+                Ok(Integer(i64::from_be_bytes(arr)))
             }
             _ => Err("else")
         }
@@ -341,25 +346,23 @@ fn main() {
         .expect("setting default subscriber failed");
 
     info!("preparing to shave yaks");
-    let res = der::encode(&Data::Integer(256));
-    println!("back: {:?}", der::decode(res).unwrap());
 
-    let xxj: u8 = Tag::Eoc.into();
-    println!("jjj: {:?}", xxj);
-    let xx: Vec<u8> = vec![0x30];
-    // println!("{:08b}", (0i8).to_be_bytes()[0]);
-    for byt in ("J😭ones").as_bytes() {
-        print!("{:x}", byt);
-    }
-    println!("");
-    for byt in der::encode_restricted_str("J😭ones") {
-        print!("{:x}", byt);
-    }
-    println!("");
-    for byt in (-1i64).to_be_bytes() {
-        print!("{:b}", byt);
-    }
-    println!("");
+    let cd = CertificateData {
+        version: 3,
+        signature_algo: String::from("sha")
+    };
+    let encoded: Vec<u8> = cd.into();
+    let decoded = CertificateData::try_from(encoded);
+    println!("dec: {:?}", decoded);
+
+    // for byt in ("J😭ones").as_bytes() {
+    //     print!("{:x}", byt);
+    // }
+    // println!("");
+    // for byt in der::encode_restricted_str("J😭ones") {
+    //     print!("{:x}", byt);
+    // }
+    // println!("");
 
     // for b in ss {
     //     println!("i: {:08b}", b);
