@@ -758,4 +758,47 @@ mod test{
             v => panic!("{:#?}", v) 
         };
     }
+
+    #[test]
+    fn test_parse_tlv_constructed_nested(){
+        let input = vec![0x24, 0x10,
+                            0x24, 0x04, 
+                                0x04, 0x02, 'h' as u8, 'e' as u8,
+                            0x02, 0x04, 0x01, 0x02, 0x03, 0x04
+                        ];
+        let parser = TLVParser::new(Box::new(input.into_iter())).unwrap();
+
+        let mut result = parser.parse().unwrap();
+        let data  = result.1.pop().unwrap();
+        // println!("{:#?}", data);
+        assert_eq!(data.borrow().identifier.class, IdentifierClass::Universal);
+        assert_eq!(data.borrow().identifier.data_type, DataType::Constructed);
+        assert_eq!(data.borrow().identifier.tag_number, 4);
+        assert_eq!(data.borrow().length.as_ref().unwrap().length, 16);
+
+        match data.borrow().content.as_ref().unwrap(){
+            Content::Constructed(children) => {
+                for child in children{
+                    assert_eq!(child.borrow().identifier.class, IdentifierClass::Universal);
+                    assert_eq!(child.borrow().length.as_ref().unwrap().length, 4);
+                    match child.borrow().content.as_ref().unwrap(){
+                        Content::Constructed(nested_children) =>{
+                            let nested_child = nested_children.first().unwrap();
+                            match nested_child.borrow().content.as_ref().unwrap(){
+                                Content::Primitive(PrimitiveContent::UTF8String(val))=>{
+                                    assert_eq!(val.as_str(), "he")
+                                }
+                                v =>  panic!("{:#?}", v)
+                            }
+                        },
+                        Content::Primitive(PrimitiveContent::Integer(val)) => {
+                            assert_eq!(val, &BigInt::from_i32(16909060).unwrap())
+                        },
+                        v => panic!("{:#?}", v)
+                    }
+                }
+            }
+            v => panic!("{:#?}", v) 
+        };
+    }
 }
