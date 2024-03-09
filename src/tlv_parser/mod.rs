@@ -3,8 +3,9 @@ use std::{fmt::{Debug}, io::{Error}, iter::{Peekable, Enumerate}};
 
 use num::{BigInt, One, Zero};
 
-use self::{error_collector::{ErrorCollector, IErrorCollector}, output_builder::EncodingDataRcel, tlv::{Content, DataType, EncodingData, Identifier, IdentifierClass, Length, PrimitiveContent}};
+use self::{error_collector::{ErrorCollector, IErrorCollector}, tlv::{Content, DataType, EncodingData, Identifier, IdentifierClass, Length, PrimitiveContent}};
 use self::output_builder::EncodingDataOutputBuilder;
+use self::tlv::EncodingDataRcel;
 
 pub mod tlv;
 pub mod output_builder;
@@ -388,6 +389,7 @@ mod test{
 
     use clap::parser;
     use num::{BigInt, FromPrimitive, ToPrimitive, Zero};
+    use serde_json::json;
 
     use crate::tlv_parser::{tlv::{DataType, IdentifierClass, Length, PrimitiveContent}, ParseContent, ParseLength};
 
@@ -800,5 +802,85 @@ mod test{
             }
             v => panic!("{:#?}", v) 
         };
+        println!("{}", serde_json::to_string_pretty(&data).unwrap());
+    }
+
+
+    #[test]
+    fn test_parse_tlv_constructed_nested_json(){
+        let input = vec![0x24, 0x10,
+                            0x24, 0x04, 
+                                0x04, 0x02, 'h' as u8, 'e' as u8,
+                            0x02, 0x04, 0x01, 0x02, 0x03, 0x04
+                        ];
+        let parser = TLVParser::new(Box::new(input.into_iter())).unwrap();
+
+        let mut result = parser.parse().unwrap();
+        let data  = result.1.pop().unwrap();
+        // println!("{:#?}", data);
+        let expected = json!({
+            "identifier": {
+              "class": "Universal",
+              "data_type": "Constructed",
+              "tag_number": 4
+            },
+            "length": {
+              "length": 16
+            },
+            "content": {
+              "Constructed": [
+                {
+                  "identifier": {
+                    "class": "Universal",
+                    "data_type": "Constructed",
+                    "tag_number": 4
+                  },
+                  "length": {
+                    "length": 4
+                  },
+                  "content": {
+                    "Constructed": [
+                      {
+                        "identifier": {
+                          "class": "Universal",
+                          "data_type": "Primitive",
+                          "tag_number": 4
+                        },
+                        "length": {
+                          "length": 2
+                        },
+                        "content": {
+                          "Primitive": {
+                            "UTF8String": "he"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "identifier": {
+                    "class": "Universal",
+                    "data_type": "Primitive",
+                    "tag_number": 2
+                  },
+                  "length": {
+                    "length": 4
+                  },
+                  "content": {
+                    "Primitive": {
+                      "Integer": [
+                        1,
+                        [
+                          16909060
+                        ]
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          });
+        assert_eq!(serde_json::to_value(&data).unwrap(), expected);
     }
 }

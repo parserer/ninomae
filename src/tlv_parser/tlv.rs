@@ -1,10 +1,14 @@
 
+use std::{cell::RefCell, rc::Rc};
+
 use num::{Zero, BigInt};
 
-use super::output_builder::EncodingDataRcel;
+use serde::{Serialize, Deserialize};
 
 
-#[derive(Debug, Clone)]
+pub type EncodingDataRcel = Rc<RefCell<EncodingData>>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncodingData{
     pub identifier: Identifier,
     pub length: Option<Length>,
@@ -37,7 +41,7 @@ impl EncodingData{
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identifier{
     pub class: IdentifierClass,
     pub data_type: DataType,
@@ -54,7 +58,7 @@ impl Identifier  {
     }
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug,Clone,PartialEq, Serialize, Deserialize)]
 pub enum IdentifierClass{
     Universal,
     Application,
@@ -62,13 +66,13 @@ pub enum IdentifierClass{
     Private
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug,Clone,PartialEq, Serialize, Deserialize)]
 pub enum DataType{
     Primitive,
     Constructed,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Length{
     pub length: u32
 }
@@ -86,7 +90,7 @@ impl Length{
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Content{
     Primitive(PrimitiveContent),
     Constructed(Vec<EncodingDataRcel>),
@@ -105,7 +109,7 @@ impl Content {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PrimitiveContent{
     Boolean(bool),
     Integer(BigInt),

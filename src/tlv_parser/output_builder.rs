@@ -1,7 +1,7 @@
 use std::{rc::Rc, cell::RefCell};
 
 use super::tlv::{Identifier, EncodingData, DataType, Content, Length};
-
+use super::tlv::EncodingDataRcel;
 ///  This doesn't work! HOW TO DROP BORROW OF A STRUCT FIELD???
 /// 
 /// 
@@ -60,8 +60,6 @@ use super::tlv::{Identifier, EncodingData, DataType, Content, Length};
 //     }
 // }
 
-
-pub type EncodingDataRcel = Rc<RefCell<EncodingData>>;
 
 pub(super) struct EncodingDataOutputBuilder{
     _list_of_data: Option<Vec<EncodingDataRcel>>,
